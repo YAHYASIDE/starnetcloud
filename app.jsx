@@ -3013,8 +3013,9 @@ function Reports({ data, toBase, settings }) {
     data.transactions.forEach((tr) => {
       const profit = txProfit(tr, toBase);
       allP += profit;
-      if (["بيع جهاز", "بيع مخزون", "تكلفة جهاز", "تكلفة مخزون"].includes(tr.type)) storeP += profit;
-      else if (["شحن", "تجديد", "تسديد دين", "دفع للمورّد"].includes(tr.type)) chargeP += profit;
+      // فصل نظيف: عمليات مرتبطة بجهاز زبون (شحن/بيع+شحن) = أرباح الأجهزة والشحن، وبيع المتجر الصافي (بدون شحن) = أرباح المتجر
+      if (tr.saleId && !tr.deviceId) storeP += profit;
+      else if (tr.deviceId) chargeP += profit;
       if (tr.date === t) dayP += profit;
       if (tr.date.slice(0, 7) === month) {
         monthP += profit;
@@ -3230,8 +3231,8 @@ function Reports({ data, toBase, settings }) {
       </div>
 
       <div className="sn-mini-grid sn-mini-grid--2">
-        <MiniStat label="🛒 أرباح المتجر (بيع الأجهزة والاكسسوارات)" val={`${money(agg.storeP)} عملة`} danger={agg.storeP < 0} />
-        <MiniStat label="📡 أرباح شحن الأجهزة (الاشتراكات)" val={`${money(agg.chargeP)} عملة`} danger={agg.chargeP < 0} />
+        <MiniStat label="🛒 أرباح المتجر (بيع بدون شحن + اكسسوارات)" val={`${money(agg.storeP)} عملة`} danger={agg.storeP < 0} />
+        <MiniStat label="📡 أرباح الأجهزة والشحن (اشتراكات + بيع مع شحن)" val={`${money(agg.chargeP)} عملة`} danger={agg.chargeP < 0} />
       </div>
 
       <div className="sn-mini-grid sn-mini-grid--2">
