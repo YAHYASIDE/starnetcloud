@@ -1,5 +1,27 @@
 const { useState, useEffect, useRef, useMemo } = React;
 
+// حاجز أخطاء: يُظهر رسالة الخطأ بدل شاشة فارغة/خضراء عند أي انهيار
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err, info) { try { console.error("App crash:", err, info); } catch (e) {} }
+  render() {
+    if (this.state.err) {
+      const e = this.state.err;
+      return React.createElement(
+        "div",
+        { dir: "rtl", style: { minHeight: "100vh", background: "#0a1024", color: "#e7ecf6", fontFamily: "Tajawal,Tahoma,sans-serif", padding: 20, display: "flex", flexDirection: "column", gap: 12, alignItems: "center", justifyContent: "center", textAlign: "center" } },
+        React.createElement("div", { style: { fontSize: 42 } }, "⚠️"),
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 900 } }, "حدث خطأ في عرض التطبيق"),
+        React.createElement("div", { style: { color: "#fca5a5", fontSize: 12, maxWidth: 340, direction: "ltr", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "#1a1326", border: "1px solid #4a2a2a", borderRadius: 10, padding: 10, textAlign: "left" } }, String((e && (e.stack || e.message)) || e)),
+        React.createElement("button", { onClick: function () { try { location.reload(); } catch (x) {} }, style: { background: "#1e2a4a", color: "#a9c2ff", border: "none", borderRadius: 10, padding: "10px 16px", fontFamily: "inherit", fontWeight: 800 } }, "🔄 إعادة تحميل"),
+        React.createElement("button", { onClick: function () { try { window.__logout && window.__logout(); } catch (x) {} }, style: { background: "#1e2a4a", color: "#fca5a5", border: "none", borderRadius: 10, padding: "10px 16px", fontFamily: "inherit", fontWeight: 800 } }, "🚪 خروج")
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ============================================================
    STAR NET — نظام إدارة عملاء وأجهزة ستارلينك
    - حفظ تلقائي دائم عبر window.storage
@@ -6056,6 +6078,6 @@ const CSS = `
 window.__state = window.__state || { authReady:false, mountFn:null, mounted:false };
 window.__state.mountFn = function(){
   var root = ReactDOM.createRoot(document.getElementById("root"));
-  root.render(React.createElement(StarNetApp));
+  root.render(React.createElement(ErrorBoundary, null, React.createElement(StarNetApp)));
 };
 if (window.__tryMount) window.__tryMount();
