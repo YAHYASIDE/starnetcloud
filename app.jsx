@@ -1143,6 +1143,8 @@ function StarNetApp() {
     setData((d) => ({ ...d, pendingInstalls: (d.pendingInstalls || []).filter((p) => p.id !== id) }));
     flash("حُذف من قيد التركيب");
   }
+
+  function addOrder(info) {
     setData((d) => ({ ...d, orders: [{ id: uid(), customerName: info.customerName || "", phone: info.phone || "", note: info.note || "", status: "جديد", date: todayStr() }, ...(d.orders || [])] }));
     flash("أُضيف الطلب 📋");
     playSound("save");
