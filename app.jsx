@@ -1,13 +1,3 @@
-// === StarNet — نسخة التطبيق الحقيقي (PWA) ===
-// تخزين دائم في ذاكرة الهاتف (localStorage) بدل تخزين Claude
-if (typeof window !== "undefined" && !window.storage) {
-  window.storage = {
-    async get(k){ try{ const v=localStorage.getItem(k); return v==null?null:{key:k,value:v}; }catch(e){ return null; } },
-    async set(k,val){ try{ localStorage.setItem(k,val); }catch(e){} return {key:k,value:val}; },
-    async delete(k){ try{ localStorage.removeItem(k); }catch(e){} return {key:k,deleted:true}; },
-    async list(prefix){ const keys=[]; for(let i=0;i<localStorage.length;i++){ const kk=localStorage.key(i); if(!prefix||kk.startsWith(prefix)) keys.push(kk);} return {keys,prefix}; }
-  };
-}
 const { useState, useEffect, useRef, useMemo } = React;
 
 /* ============================================================
@@ -1271,6 +1261,27 @@ function StarNetApp() {
 
   if (locked && data.settings.pin) {
     return <LockScreen pin={data.settings.pin} onUnlock={() => setLocked(false)} />;
+  }
+
+  // ===== واجهة المندوب المقيّدة (يرى أجهزته فقط، بلا أرباح) =====
+  const __email = ((typeof window !== "undefined" && window.__userEmail) || "").toString().trim().toLowerCase();
+  const __ADMINS = ["yahyaazawadi91@gmail.com", "etssadaga@gmail.com"];
+  const __myAgent = (!__email || __ADMINS.includes(__email))
+    ? null
+    : (data.agents || []).find((a) => (a.loginEmail || "").trim().toLowerCase() === __email);
+  if (__myAgent) {
+    return <AgentView agent={__myAgent} data={data} settings={data.settings} />;
+  }
+  if (__email && !__ADMINS.includes(__email)) {
+    return (
+      <div className="sn-root" dir="rtl" style={{ minHeight: "100vh", background: "#0a1024", color: "#e7ecf6", fontFamily: "Tajawal,Tahoma,sans-serif", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, padding: 24, textAlign: "center" }}>
+        <style>{CSS}</style>
+        <div style={{ fontSize: 46 }}>🔒</div>
+        <div style={{ fontSize: 18, fontWeight: 900 }}>لا توجد صلاحية لهذا الحساب بعد</div>
+        <div style={{ color: "#8b95ac", fontSize: 13, maxWidth: 320 }}>لم يتم ربط حسابك بمندوب. تواصل مع الإدارة لربط بريدك ({__email}) بأجهزتك.</div>
+        <button onClick={() => window.__logout && window.__logout()} style={{ background: "#1e2a4a", color: "#fca5a5", border: "none", borderRadius: 10, padding: "10px 16px", fontFamily: "inherit", fontWeight: 800 }}>🚪 خروج</button>
+      </div>
+    );
   }
 
   return (
@@ -4217,11 +4228,79 @@ function CountryForm({ initial, onCancel, onSave }) {
   );
 }
 
+function AgentView({ agent, data, settings }) {
+  const myDevices = (data.devices || []).filter((d) => d.agentId === agent.id);
+  const activeCount = myDevices.filter((d) => !d.broken && diffDays(todayStr(), d.endDate) >= 0).length;
+  const brokenCount = myDevices.filter((d) => d.broken).length;
+  let totalDebt = 0;
+  myDevices.forEach((d) => { if (Number(d.debt) > 0) totalDebt += tb(Number(d.debt), d.debtCurrency || d.currency || "MRU"); });
+  const paidToMe = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+
+  const stColor = (k) => k === "active" ? "#34d399" : (k === "soon" || k === "urgent") ? "#fbbf24" : "#fb7185";
+  const box = { background: "#111a36", border: "1px solid #243352", borderRadius: 16, padding: 14, marginBottom: 12 };
+  const lbl = { color: "#8b95ac", fontSize: 12 };
+  const val = { fontWeight: 800, fontSize: 14, color: "#e7ecf6" };
+
+  return (
+    <div className="sn-root" dir="rtl" style={{ minHeight: "100vh", background: "#0a1024", color: "#e7ecf6", fontFamily: "Tajawal,Tahoma,sans-serif", padding: 14 }}>
+      <style>{CSS}</style>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 900 }}>🤝 {agent.name}</div>
+          <div style={{ color: "#8b95ac", fontSize: 12 }}>مندوب — {settings.businessName || "STAR NET"}</div>
+        </div>
+        <button onClick={() => window.__logout && window.__logout()} style={{ background: "#1e2a4a", color: "#fca5a5", border: "none", borderRadius: 10, padding: "8px 12px", fontFamily: "inherit", fontWeight: 800 }}>🚪 خروج</button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+        <div style={{ ...box, marginBottom: 0, textAlign: "center" }}><div style={lbl}>أجهزتي</div><div style={{ ...val, fontSize: 20 }}>{myDevices.length}</div></div>
+        <div style={{ ...box, marginBottom: 0, textAlign: "center" }}><div style={lbl}>نشطة</div><div style={{ ...val, fontSize: 20, color: "#34d399" }}>{activeCount}</div></div>
+        <div style={{ ...box, marginBottom: 0, textAlign: "center" }}><div style={lbl}>معطّلة</div><div style={{ ...val, fontSize: 20, color: "#fb7185" }}>{brokenCount}</div></div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+        <div style={{ ...box, marginBottom: 0 }}><div style={lbl}>إجمالي ديون زبائني</div><div style={{ ...val, color: totalDebt > 0 ? "#fb7185" : "#34d399" }}>{money(Math.round(totalDebt))} عملة</div></div>
+        <div style={{ ...box, marginBottom: 0 }}><div style={lbl}>ما استلمته منك</div><div style={val}>{money(Math.round(paidToMe))} عملة</div></div>
+      </div>
+
+      {myDevices.length === 0 && (
+        <div style={{ ...box, textAlign: "center", color: "#8b95ac" }}>لا توجد أجهزة مرتبطة بك بعد.</div>
+      )}
+
+      {myDevices.map((d) => {
+        const st = statusOf(d);
+        const dl = diffDays(todayStr(), d.endDate);
+        const debt = Number(d.debt) || 0;
+        const notes = [].concat(d.originNote ? [d.originNote] : [], Array.isArray(d.notes) ? d.notes : []).filter(Boolean);
+        return (
+          <div key={d.id} style={box}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontWeight: 900, fontSize: 15 }}>{d.name || "بدون اسم"}{d.account ? ` — ${d.account}` : ""}</div>
+              <span style={{ background: stColor(st.key) + "22", color: stColor(st.key), borderRadius: 8, padding: "3px 9px", fontSize: 12, fontWeight: 800 }}>{st.label}</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div><div style={lbl}>ينتهي</div><div style={val}>{d.endDate || "—"}{!d.broken && dl >= 0 ? ` (${dl} يوم)` : ""}</div></div>
+              <div><div style={lbl}>آخر شحن</div><div style={val}>{d.startDate || "—"}</div></div>
+              <div><div style={lbl}>دُفع للمورّد؟</div><div style={{ ...val, color: d.costPaid ? "#34d399" : "#fbbf24" }}>{d.costPaid ? "نعم ✓" : "لا"}</div></div>
+              <div><div style={lbl}>المبلغ المستحق</div><div style={{ ...val, color: debt > 0 ? "#fb7185" : "#34d399" }}>{debt > 0 ? `${money(debt)} ${d.debtCurrency || d.currency || "MRU"}` : "لا دين ✓"}</div></div>
+            </div>
+            {notes.length > 0 && (
+              <div style={{ marginTop: 8 }}><div style={lbl}>ملاحظات</div><div style={{ color: "#cdd6f4", fontSize: 13 }}>{notes.join(" • ")}</div></div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function AgentForm({ initial, onCancel, onSave }) {
   const isNew = !initial;
   const [name, setName] = useState(initial?.name || "");
   const [percent, setPercent] = useState(initial?.percent ?? 33);
   const [color, setColor] = useState(initial?.color || AGENT_COLORS[0]);
+  const [loginEmail, setLoginEmail] = useState(initial?.loginEmail || "");
   return (
     <Sheet title={isNew ? "إضافة مندوب" : "تعديل المندوب"} onClose={onCancel}>
       <Field label="اسم المندوب *">
@@ -4248,13 +4327,23 @@ function AgentForm({ initial, onCancel, onSave }) {
           ))}
         </div>
       </Field>
+      <Field label="بريد دخول المندوب (ليرى أجهزته فقط)">
+        <input
+          type="email"
+          inputMode="email"
+          dir="ltr"
+          placeholder="agent@email.com"
+          value={loginEmail}
+          onChange={(e) => setLoginEmail(e.target.value)}
+        />
+      </Field>
       <div className="sn-sheet-actions">
         <button className="sn-btn sn-btn--ghost" onClick={onCancel}>إلغاء</button>
         <button
           className="sn-btn sn-btn--primary"
           disabled={!name.trim()}
           onClick={() =>
-            onSave({ id: initial?.id, name: name.trim(), percent: Number(percent) || 0, color })
+            onSave({ id: initial?.id, name: name.trim(), percent: Number(percent) || 0, color, loginEmail: loginEmail.trim().toLowerCase() })
           }
         >
           {isNew ? "إضافة" : "حفظ"}
@@ -5729,6 +5818,10 @@ const CSS = `
 `;
 
 
-// === تشغيل التطبيق ===
-const __root = ReactDOM.createRoot(document.getElementById("root"));
-__root.render(React.createElement(StarNetApp));
+// === تشغيل مؤجّل بعد تسجيل الدخول ===
+window.__state = window.__state || { authReady:false, mountFn:null, mounted:false };
+window.__state.mountFn = function(){
+  var root = ReactDOM.createRoot(document.getElementById("root"));
+  root.render(React.createElement(StarNetApp));
+};
+if (window.__tryMount) window.__tryMount();

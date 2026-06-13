@@ -94,10 +94,11 @@ onAuthStateChanged(auth,async(user)=>{
     }catch(e){console.error(e);cache={};}
     setupStorage(user.uid);
     const w=$("whoami"); if(w) w.textContent=user.email||"مستخدم";
+    window.__userEmail=email;
     window.__state.authReady=true; window.__tryMount();
     $("login").style.display="none"; $("topbar").style.display="flex";
   } else {
-    window.__state.authReady=false; window.__state.mounted=false;
+    window.__state.authReady=false; window.__state.mounted=false; window.__userEmail=null;
     document.body.classList.remove("signed");
     $("login").style.display="flex"; $("topbar").style.display="none";
     const r=$("root"); if(r) r.innerHTML=""; cache={};
