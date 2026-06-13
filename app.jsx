@@ -131,6 +131,7 @@ const DEFAULT_DATA = {
   personNumbers: {}, // رقم تسلسلي ثابت لكل شخص
   agentPayouts: [], // تسويات المندوبين: {id, agentId, amount, date}
   inventory: [], // المخزون: {id, name, category(device|accessory), qty, cost, costCurrency, price, currency}
+  pendingInstalls: [], // أجهزة مُباعة قيد التركيب لم تُشحن بعد: {id, itemName, buyerName, dialCode, phone, email, salePrice, saleCurrency, date}
   orders: [], // قائمة انتظار الطلبات: {id, customerName, phone, note, status, date}
 };
 
@@ -517,6 +518,8 @@ function StarNetApp() {
   const [drawer, setDrawer] = useState(false);
   const [panel, setPanel] = useState(null); // null | countries | contacts | excel | backup | trash
   const [editing, setEditing] = useState(null); // device | "new" | null
+  const [sellingItem, setSellingItem] = useState(null); // صنف مخزون قيد البيع | null
+  const [chargingPendingId, setChargingPendingId] = useState(null); // id لعنصر قيد التركيب يُشحن الآن | null
   const [renewing, setRenewing] = useState(null); // device | null
   const [collecting, setCollecting] = useState(null); // device being collected | null
   const [payingSupplier, setPayingSupplier] = useState(null); // device being paid to supplier | null
@@ -712,11 +715,13 @@ function StarNetApp() {
           contacts = [...contacts, { ...cData, id: uid(), createdAt: todayStr(), note: "" }];
         }
       }
-      return { ...d, devices, transactions, contacts, personColors: assignPersonColors(devices, d.personColors), personNumbers: assignPersonNumbers(devices, d.personNumbers) };
+      const pendingInstalls = (isNew && chargingPendingId) ? (d.pendingInstalls || []).filter((p) => p.id !== chargingPendingId) : (d.pendingInstalls || []);
+      return { ...d, devices, transactions, contacts, pendingInstalls, personColors: assignPersonColors(devices, d.personColors), personNumbers: assignPersonNumbers(devices, d.personNumbers) };
     });
     flash(isNew ? "تمت إضافة الجهاز ✅" : "تم حفظ التعديلات ✅");
     playSound(isNew ? "charge" : "save");
     setEditing(null);
+    setChargingPendingId(null);
   }
 
   function renewDevice(device, info) {
@@ -784,13 +789,30 @@ function StarNetApp() {
     setConfirm({
       text: `حذف جهاز «${device.customerName || "بدون اسم"}»؟ سيُنقل إلى سلة المحذوفات ويمكن استعادته.`,
       onYes: () => {
-        setData((d) => ({
-          ...d,
-          devices: d.devices.filter((x) => x.id !== device.id),
-          transactions: d.transactions.filter((t) => t.deviceId !== device.id),
-          trash: [{ device, transactions: d.transactions.filter((t) => t.deviceId === device.id), deletedAt: todayStr() }, ...(d.trash || [])],
-        }));
-        flash("نُقل إلى سلة المحذوفات 🗑️");
+        setData((d) => {
+          // حفظ بيانات الزبون في دفتر العملاء قبل الحذف (الاسم/البريد/الهاتف…)
+          let contacts = d.contacts || [];
+          const nm = (device.customerName || "").trim();
+          if (nm) {
+            const cData = {
+              name: nm, dialCode: device.dialCode || "+222", phone: device.phone || "", email: device.email || "",
+              accountNumber: device.accountNumber || "", wifiPassword: device.wifiPassword || "", emailPassword: device.emailPassword || "",
+              country: device.country || "", currency: device.currency || "MRU", totalCustomer: device.totalCustomer ?? "",
+              cost: device.cost ?? "", costCurrency: device.costCurrency || "USDT", payMethod: device.payMethod || "BANKILY", agentId: device.agentId || "",
+            };
+            const ci = contacts.findIndex((c) => (c.name || "").trim().toLowerCase() === nm.toLowerCase());
+            if (ci >= 0) contacts = contacts.map((c, i) => (i === ci ? { ...c, ...cData } : c));
+            else contacts = [...contacts, { ...cData, id: uid(), createdAt: todayStr(), note: "محفوظ تلقائياً عند حذف الجهاز" }];
+          }
+          return {
+            ...d,
+            contacts,
+            devices: d.devices.filter((x) => x.id !== device.id),
+            transactions: d.transactions.filter((t) => t.deviceId !== device.id),
+            trash: [{ device, transactions: d.transactions.filter((t) => t.deviceId === device.id), deletedAt: todayStr() }, ...(d.trash || [])],
+          };
+        });
+        flash("حُذف الجهاز • بيانات الزبون محفوظة في الدفتر 📒");
         playSound("delete");
         setConfirm(null);
         setUndoSnap({ data, label: "حذف جهاز", t: Date.now() });
@@ -1063,7 +1085,42 @@ function StarNetApp() {
     playSound("payment");
   }
 
-  function addOrder(info) {
+  // === المتجر: بيع جهاز (الآن / قيد التركيب) ===
+  function sellDeviceStore(item, info) {
+    // info: { buyerName, dialCode, phone, email, salePrice, saleCurrency, mode:"now"|"pending" }
+    snapshot("بيع جهاز من المتجر");
+    setData((d) => {
+      const inventory = (d.inventory || []).map((it) => (it.id === item.id ? { ...it, qty: Math.max(0, (Number(it.qty) || 0) - 1) } : it));
+      const saleId = uid();
+      const txs = [...d.transactions];
+      txs.unshift({ id: uid(), saleId, date: todayStr(), amount: Number(info.salePrice) || 0, currency: info.saleCurrency || "MRU", type: "بيع جهاز", service: item.name, customerName: info.buyerName || "", note: "جهاز من المتجر" });
+      if (Number(item.cost) > 0) {
+        txs.unshift({ id: uid(), saleId, date: todayStr(), amount: Number(item.cost) || 0, currency: item.costCurrency || "USDT", isExpense: true, type: "تكلفة جهاز", service: item.name, customerName: info.buyerName || "" });
+      }
+      let pendingInstalls = d.pendingInstalls || [];
+      if (info.mode === "pending") {
+        pendingInstalls = [{ id: uid(), itemName: item.name, buyerName: info.buyerName || "", dialCode: info.dialCode || "+222", phone: info.phone || "", email: info.email || "", salePrice: Number(info.salePrice) || 0, saleCurrency: info.saleCurrency || "MRU", date: todayStr() }, ...pendingInstalls];
+      }
+      return { ...d, inventory, transactions: txs, pendingInstalls };
+    });
+    setSellingItem(null);
+    if (info.mode === "now") {
+      setEditing({ customerName: info.buyerName || "", dialCode: info.dialCode || "+222", phone: info.phone || "", email: info.email || "", currency: info.saleCurrency || "MRU" });
+      flash("سُجّل بيع الجهاز ✅ أكمل بيانات الشحن");
+    } else {
+      flash("سُجّل البيع — الجهاز في «قيد التركيب» ⏳");
+    }
+    playSound("payment");
+  }
+  // شحن جهاز كان قيد التركيب → يفتح نموذج إضافة جهاز كاملاً مملوءاً ببيانات المشتري
+  function chargePending(p) {
+    setChargingPendingId(p.id);
+    setEditing({ customerName: p.buyerName || "", dialCode: p.dialCode || "+222", phone: p.phone || "", email: p.email || "", currency: p.saleCurrency || "MRU" });
+  }
+  function deletePending(id) {
+    setData((d) => ({ ...d, pendingInstalls: (d.pendingInstalls || []).filter((p) => p.id !== id) }));
+    flash("حُذف من قيد التركيب");
+  }
     setData((d) => ({ ...d, orders: [{ id: uid(), customerName: info.customerName || "", phone: info.phone || "", note: info.note || "", status: "جديد", date: todayStr() }, ...(d.orders || [])] }));
     flash("أُضيف الطلب 📋");
     playSound("save");
@@ -1314,19 +1371,6 @@ function StarNetApp() {
               </div>
             </div>
             <div className="sn-drawer-list">
-              {[
-                ["dashboard", "🛰️", "الرئيسية"],
-                ["devices", "📋", `الأجهزة (${data.devices.length})`],
-                ["agents", "🤝", "المندوبون"],
-                ["reports", "📊", "التقارير والأرباح"],
-                ["settings", "⚙️", "الإعدادات"],
-              ].map(([k, ic, lbl]) => (
-                <button key={k} className={"sn-drawer-item" + (tab === k ? " is-active" : "")} onClick={() => { setTab(k); setDrawer(false); }}>
-                  <span className="sn-drawer-ic">{ic}</span>
-                  <span className="sn-drawer-lbl">{lbl}</span>
-                </button>
-              ))}
-              <div className="sn-drawer-sep" />
               <button className="sn-drawer-item" onClick={() => { setEditing("new"); setDrawer(false); }}>
                 <span className="sn-drawer-ic">➕</span>
                 <span className="sn-drawer-lbl">إضافة جهاز جديد</span>
@@ -1402,6 +1446,7 @@ function StarNetApp() {
             onWhats={(dev, kind) => openWhatsApp(dev, kind, settings, customerBalance(dev, data, settings.rates))}
             onAdd={() => setEditing("new")}
             goDevices={() => setTab("devices")}
+            goCalendar={() => setPanel("calendar")}
           />
         )}
         {tab === "devices" && (
@@ -1482,8 +1527,15 @@ function StarNetApp() {
           agents={data.agents || []}
           countries={data.countries || []}
           onSaveRate={upsertCountryRate}
-          onCancel={() => setEditing(null)}
+          onCancel={() => { setEditing(null); setChargingPendingId(null); }}
           onSave={saveDevice}
+        />
+      )}
+      {sellingItem && (
+        <SellDeviceSheet
+          item={sellingItem}
+          onCancel={() => setSellingItem(null)}
+          onConfirm={(info) => sellDeviceStore(sellingItem, info)}
         />
       )}
       {editingContact && (
@@ -1523,6 +1575,9 @@ function StarNetApp() {
           onAdjustInv={adjustInvQty}
           onDeleteInv={deleteInvItem}
           onSellInv={sellInvItem}
+          onSellDevice={(it) => setSellingItem(it)}
+          onChargePending={chargePending}
+          onDeletePending={deletePending}
           onAddOrder={addOrder}
           onCycleOrder={cycleOrder}
           onDeleteOrder={deleteOrder}
@@ -1615,13 +1670,19 @@ function StarNetApp() {
 function openWhatsApp(device, kind, settings, balance) {
   const tpl = kind === "reminder" ? settings.msgReminder : settings.msgCharged;
   // الرصيد المجمّع لكل حسابات نفس الشخص (بعملة الأساس)
+  // الرصيد المجمّع (بعملة الأساس) ثم نحوّله لعملة الزبون التي نتعامل بها معه
+  const rates = (settings && settings.rates) || {};
   const net = balance ? balance.net : Number(device.debt) || 0;
-  const hasDebt = net > 0;
-  const hasCredit = net < 0;
-  const debtText = hasDebt ? `${money(net)} MRU` : "لا يوجد";
-  const debtLine = hasDebt ? `\n💰 إجمالي المتبقي عليك: ${money(net)} MRU` : "";
-  const creditText = hasCredit ? `${money(-net)} MRU` : "لا يوجد";
-  const creditLine = hasCredit ? `\n💳 رصيدك المحفوظ لدينا: ${money(-net)} MRU` : "";
+  const cur = device.currency || device.debtCurrency || "MRU";
+  const sym = symbolOf(cur);
+  const rate = rates[cur] ?? 1;
+  const netCur = net / (rate || 1);
+  const hasDebt = netCur > 0;
+  const hasCredit = netCur < 0;
+  const debtText = hasDebt ? `${money(netCur)} ${sym}` : "لا يوجد";
+  const debtLine = hasDebt ? `\n💰 إجمالي المتبقي عليك: ${money(netCur)} ${sym}` : "";
+  const creditText = hasCredit ? `${money(-netCur)} ${sym}` : "لا يوجد";
+  const creditLine = hasCredit ? `\n💳 رصيدك المحفوظ لدينا: ${money(-netCur)} ${sym}` : "";
   // الوقت المتبقّي على الانتهاء (أو منذ متى انتهى)
   let remainingLine = "";
   if (device.endDate) {
@@ -1958,8 +2019,12 @@ function DueToday({ data, settings, onRenew, onWhats, onClearDebt, onMarkPaid, g
   );
 }
 
-function Dashboard({ data, settings, toBase, onRenew, onMarkPaid, onBroken, onClearDebt, onWhats, onAdd, goDevices }) {
+function Dashboard({ data, settings, toBase, onRenew, onMarkPaid, onBroken, onClearDebt, onWhats, onAdd, goDevices, goCalendar }) {
   const t = todayStr();
+  const [openSup, setOpenSup] = useState(true);
+  const [openSupPaid, setOpenSupPaid] = useState(false);
+  const [openDebt, setOpenDebt] = useState(true);
+  const [openDebtPaid, setOpenDebtPaid] = useState(false);
   const stats = useMemo(() => {
     let active = 0, urgent = 0, expired = 0, debtBase = 0, supplierUnpaid = 0;
     data.devices.forEach((d) => {
@@ -2000,6 +2065,10 @@ function Dashboard({ data, settings, toBase, onRenew, onMarkPaid, onBroken, onCl
     .filter((d) => d.debt > 0)
     .sort((a, b) => toBase(b.debt, b.debtCurrency || b.currency) - toBase(a.debt, a.debtCurrency || a.currency));
 
+  // مجلدات «مدفوعة»: ما دُفع للمورّد فعلاً، وزبائن سدّدوا كاملاً
+  const supplierPaid = data.devices.filter((d) => d.costPaid && Number(d.cost) > 0 && !d.broken);
+  const debtPaid = data.devices.filter((d) => Number(d.totalCustomer) > 0 && !(Number(d.debt) > 0) && !d.broken);
+
   const attention = data.devices
     .filter((d) => ["expired", "urgent", "soon"].includes(statusOf(d).key))
     .sort((a, b) => diffDays(t, a.endDate) - diffDays(t, b.endDate));
@@ -2007,6 +2076,9 @@ function Dashboard({ data, settings, toBase, onRenew, onMarkPaid, onBroken, onCl
   return (
     <div className="sn-page">
       <DueToday data={data} settings={settings} onRenew={onRenew} onWhats={onWhats} onClearDebt={onClearDebt} onMarkPaid={onMarkPaid} goDevices={goDevices} />
+      {goCalendar && (
+        <button className="sn-btn sn-btn--ghost sn-full" onClick={goCalendar}>🗓️ تقويم التجديدات الكامل — كل الأيام والتفاصيل</button>
+      )}
       <section className="sn-profit-grid">
         <div className="sn-profit sn-profit--day">
           <span className="sn-profit-lbl">أرباح اليوم</span>
@@ -2088,65 +2160,93 @@ function Dashboard({ data, settings, toBase, onRenew, onMarkPaid, onBroken, onCl
       </section>
 
       <section>
-        <div className="sn-sec-head">
-          <h2>الدفع للمورّد</h2>
+        <div className="sn-sec-head" style={{ cursor: "pointer" }} onClick={() => setOpenSup((v) => !v)}>
+          <h2>🏷️ الدفع للمورّد {openSup ? "▾" : "◂"}</h2>
           <span className="sn-count">{supplierDue.length}</span>
         </div>
-        {supplierDue.length === 0 ? (
-          <Empty icon="🏷️" title="لا مستحقات للمورّد" sub="كل تكاليف الأجهزة مدفوعة للمورّد." />
-        ) : (
-          supplierDue.map(({ d, due }) => {
-            const dl = diffDays(t, due);
-            const cls = dl < 0 ? "expired" : dl <= (settings.soonDays || 3) ? "urgent" : "soon";
-            return (
-              <div className={"sn-alert sn-alert--" + cls} key={d.id}>
-                <div className="sn-alert-main">
-                  <span className="sn-alert-name">{d.customerName}</span>
-                  <span className="sn-alert-meta">
-                    {dl < 0 ? `تأخّر ${Math.abs(dl)} يوم` : dl === 0 ? "الدفع اليوم" : `ادفع خلال ${dl} يوم`}
-                    {" • "}{money(d.cost)} {symbolOf(d.costCurrency || "USDT")} • {fmtDate(due)}
-                  </span>
+        {openSup && (
+          supplierDue.length === 0 ? (
+            <Empty icon="🏷️" title="لا مستحقات للمورّد" sub="كل تكاليف الأجهزة مدفوعة للمورّد." />
+          ) : (
+            supplierDue.map(({ d, due }) => {
+              const dl = diffDays(t, due);
+              const cls = dl < 0 ? "expired" : dl <= (settings.soonDays || 3) ? "urgent" : "soon";
+              return (
+                <div className={"sn-alert sn-alert--" + cls} key={d.id}>
+                  <div className="sn-alert-main">
+                    <span className="sn-alert-name">{d.customerName}</span>
+                    <span className="sn-alert-meta">
+                      {dl < 0 ? `تأخّر ${Math.abs(dl)} يوم` : dl === 0 ? "الدفع اليوم" : `ادفع خلال ${dl} يوم`}
+                      {" • "}{money(d.cost)} {symbolOf(d.costCurrency || "USDT")} • {fmtDate(due)}
+                    </span>
+                  </div>
+                  <div className="sn-alert-actions">
+                    <button className="sn-mini sn-mini--green" onClick={() => onMarkPaid(d, true)}>دفعت</button>
+                    <button className="sn-mini sn-mini--gold" onClick={() => onBroken(d)}>تعطّل</button>
+                  </div>
                 </div>
-                <div className="sn-alert-actions">
-                  <button className="sn-mini sn-mini--green" onClick={() => onMarkPaid(d, true)}>
-                    دفعت
-                  </button>
-                  <button className="sn-mini sn-mini--gold" onClick={() => onBroken(d)}>
-                    تعطّل
-                  </button>
+              );
+            })
+          )
+        )}
+        {openSup && supplierPaid.length > 0 && (
+          <>
+            <button className="sn-collapse-h" style={{ marginTop: 8 }} onClick={() => setOpenSupPaid((v) => !v)}>
+              <span>✅ مدفوعة للمورّد ({supplierPaid.length})</span>
+              <span>{openSupPaid ? "▾" : "◂"}</span>
+            </button>
+            {openSupPaid && supplierPaid.map((d) => (
+              <div className="sn-inv-row" key={d.id}>
+                <div className="sn-inv-info">
+                  <span className="sn-inv-name">{d.customerName || "—"}</span>
+                  <span className="sn-inv-sub">سُدّد للمورّد {money(d.cost)} {symbolOf(d.costCurrency || "USDT")} • {fmtDate(d.startDate)}</span>
                 </div>
+                <button className="sn-mini sn-mini--gold" onClick={() => onMarkPaid(d, false)}>↩️ تراجع</button>
               </div>
-            );
-          })
+            ))}
+          </>
         )}
       </section>
 
       <section>
-        <div className="sn-sec-head">
-          <h2>ديون العملاء</h2>
+        <div className="sn-sec-head" style={{ cursor: "pointer" }} onClick={() => setOpenDebt((v) => !v)}>
+          <h2>💰 ديون العملاء {openDebt ? "▾" : "◂"}</h2>
           <span className="sn-count">{debtors.length}</span>
         </div>
-        {debtors.length === 0 ? (
-          <Empty icon="💰" title="لا ديون على العملاء" sub="كل العملاء سدّدوا مستحقاتهم." />
-        ) : (
-          debtors.map((d) => (
-            <div className="sn-alert sn-alert--soon" key={d.id}>
-              <div className="sn-alert-main">
-                <span className="sn-alert-name">{d.customerName}</span>
-                <span className="sn-alert-meta">
-                  دين متبقٍّ: {money(d.debt)} {symbolOf(d.debtCurrency || d.currency)}
-                </span>
+        {openDebt && (
+          debtors.length === 0 ? (
+            <Empty icon="💰" title="لا ديون على العملاء" sub="كل العملاء سدّدوا مستحقاتهم." />
+          ) : (
+            debtors.map((d) => (
+              <div className="sn-alert sn-alert--soon" key={d.id}>
+                <div className="sn-alert-main">
+                  <span className="sn-alert-name">{d.customerName}</span>
+                  <span className="sn-alert-meta">دين متبقٍّ: {money(d.debt)} {symbolOf(d.debtCurrency || d.currency)}</span>
+                </div>
+                <div className="sn-alert-actions">
+                  <button className="sn-mini sn-mini--green" onClick={() => onClearDebt(d)}>حصّلت</button>
+                  <button className="sn-mini" onClick={() => onWhats(d, "reminder")}>واتساب</button>
+                </div>
               </div>
-              <div className="sn-alert-actions">
-                <button className="sn-mini sn-mini--green" onClick={() => onClearDebt(d)}>
-                  حصّلت
-                </button>
-                <button className="sn-mini" onClick={() => onWhats(d, "reminder")}>
-                  واتساب
-                </button>
+            ))
+          )
+        )}
+        {openDebt && debtPaid.length > 0 && (
+          <>
+            <button className="sn-collapse-h" style={{ marginTop: 8 }} onClick={() => setOpenDebtPaid((v) => !v)}>
+              <span>✅ زبائن سدّدوا كاملاً ({debtPaid.length})</span>
+              <span>{openDebtPaid ? "▾" : "◂"}</span>
+            </button>
+            {openDebtPaid && debtPaid.map((d) => (
+              <div className="sn-inv-row" key={d.id}>
+                <div className="sn-inv-info">
+                  <span className="sn-inv-name">{d.customerName || "—"}</span>
+                  <span className="sn-inv-sub">دفع كاملاً {money(d.totalCustomer)} {symbolOf(d.currency)} • {fmtDate(d.startDate)}</span>
+                </div>
+                <button className="sn-mini" onClick={() => onWhats(d, "receipt")}>🧾</button>
               </div>
-            </div>
-          ))
+            ))}
+          </>
         )}
       </section>
     </div>
@@ -3166,7 +3266,7 @@ function CountryPicker({ value, onChange }) {
 }
 
 function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [], countries = [], onSaveRate, onCancel, onSave }) {
-  const isNew = !initial;
+  const isNew = !initial || !initial.id;
   const [f, setF] = useState(
     initial
       ? {
@@ -4403,6 +4503,35 @@ function AgentDevices({ agent, data, toBase, onClose, onEdit, onRenew, onCopy, o
   );
 }
 
+function CalDayItem({ d }) {
+  const [open, setOpen] = useState(false);
+  const s = statusOf(d);
+  const stCls = d.broken ? "off" : s.key === "expired" ? "urgent" : (s.key === "urgent" || s.key === "soon") ? "warn" : "ok";
+  const telNum = ((d.dialCode || "") + (d.phone || "")).replace(/\D/g, "");
+  return (
+    <div className="sn-cal-dev">
+      <div className="sn-cal-dev-top">
+        <div className="sn-cal-dev-info">
+          <span className="sn-cal-dev-name">{d.customerName || "—"}</span>
+          <span className={"sn-cd sn-cd--" + stCls}>{d.broken ? "⛔ معطّل" : s.label}</span>
+        </div>
+        <button className="sn-mini" onClick={() => setOpen(!open)}>{open ? "▾ إخفاء" : "تفاصيل"}</button>
+      </div>
+      {open && (
+        <div className="sn-cal-dev-body">
+          {d.accountNumber ? <div>🔢 {d.accountNumber}</div> : null}
+          {d.phone ? <div dir="ltr">📞 {(d.dialCode || "") + d.phone}</div> : null}
+          {d.email ? <div dir="ltr">📧 {d.email}</div> : null}
+          {d.package ? <div>🗂️ {d.package}</div> : null}
+          <div>📅 شحن {fmtDate(d.startDate)} ← انتهاء {fmtDate(d.endDate)}</div>
+          {Number(d.debt) > 0 ? <div className="sn-neg">💰 دين {money(d.debt)} {symbolOf(d.debtCurrency || d.currency)}</div> : null}
+          {telNum ? <div style={{ marginTop: 6 }}><button className="sn-mini sn-mini--green" onClick={() => window.open("tel:" + telNum)}>📞 اتصال</button></div> : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============================================================
    أدوات (تُفتح من القائمة الجانبية)
    ============================================================ */
@@ -4416,17 +4545,28 @@ function CalendarPanel({ data }) {
   const monthStr = `${base.y}-${String(base.m + 1).padStart(2, "0")}`;
   const byDay = {};
   (data.devices || []).forEach((d) => {
-    if (d.broken) return;
     const e = d.endDate || "";
     if (e.slice(0, 7) === monthStr) {
       const day = Number(e.slice(8, 10));
       (byDay[day] = byDay[day] || []).push(d);
     }
   });
+  // لون اليوم حسب أسوأ حالة فيه: أحمر منتهٍ، أصفر قريب، أخضر نشط
+  const dayClass = (list) => {
+    if (!list.length) return "";
+    let worst = "ok";
+    list.forEach((d) => {
+      const k = d.broken ? "off" : statusOf(d).key;
+      if (k === "expired" || k === "broken" || k === "off") worst = "expired";
+      else if ((k === "urgent" || k === "soon") && worst !== "expired") worst = "soon";
+    });
+    return " has has-" + worst;
+  };
   const monthName = first.toLocaleDateString("ar", { month: "long", year: "numeric" });
   const move = (n) => { setSelDay(null); setBase((b) => { const d = new Date(b.y, b.m + n, 1); return { y: d.getFullYear(), m: d.getMonth() }; }); };
   const wd = ["أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"];
   const todayN = (now.getFullYear() === base.y && now.getMonth() === base.m) ? now.getDate() : -1;
+  const monthCount = Object.values(byDay).reduce((s, l) => s + l.length, 0);
   return (
     <>
       <div className="sn-cal-nav">
@@ -4434,6 +4574,7 @@ function CalendarPanel({ data }) {
         <span>{monthName}</span>
         <button onClick={() => move(1)}>›</button>
       </div>
+      <p className="sn-hint" style={{ marginTop: 0, textAlign: "center" }}>أجهزة تنتهي هذا الشهر: <strong>{monthCount}</strong> • 🟢 نشط · 🟡 قريب · 🔴 منتهٍ/معطّل</p>
       <div className="sn-cal-grid sn-cal-head">{wd.map((w) => <span key={w} className="sn-cal-wd">{w}</span>)}</div>
       <div className="sn-cal-grid">
         {Array.from({ length: startWeekday }).map((_, i) => <span key={"b" + i} />)}
@@ -4443,7 +4584,7 @@ function CalendarPanel({ data }) {
           return (
             <button
               key={day}
-              className={"sn-cal-day" + (day === todayN ? " is-today" : "") + (selDay === day ? " is-sel" : "") + (list.length ? " has" : "")}
+              className={"sn-cal-day" + (day === todayN ? " is-today" : "") + (selDay === day ? " is-sel" : "") + dayClass(list)}
               onClick={() => setSelDay(selDay === day ? null : day)}
             >
               <span>{day}</span>
@@ -4454,20 +4595,15 @@ function CalendarPanel({ data }) {
       </div>
       {selDay && (
         <div className="sn-cal-list">
-          <div className="sn-cal-list-h">تجديدات يوم {selDay}/{base.m + 1}</div>
+          <div className="sn-cal-list-h">أجهزة يوم {selDay}/{base.m + 1} ({(byDay[selDay] || []).length})</div>
           {(byDay[selDay] || []).length === 0 ? (
-            <p className="sn-muted-txt">لا تجديدات هذا اليوم.</p>
+            <p className="sn-muted-txt">لا أجهزة تنتهي هذا اليوم.</p>
           ) : (
-            (byDay[selDay] || []).map((d) => (
-              <div className="sn-cal-item" key={d.id}>
-                <span>{d.customerName || "—"}</span>
-                <span className="sn-cal-item-sub">{d.phone || d.email || "—"}</span>
-              </div>
-            ))
+            (byDay[selDay] || []).map((d) => <CalDayItem key={d.id} d={d} />)
           )}
         </div>
       )}
-      <p className="sn-hint">الأرقام الحمراء = عدد الاشتراكات المنتهية في ذلك اليوم. اضغط يوماً لرؤية الأسماء.</p>
+      <p className="sn-hint">اضغط أي يوم لرؤية كل الأجهزة التي تنتهي فيه (نشطة ومنتهية)، ثم «تفاصيل» لكل جهاز.</p>
     </>
   );
 }
@@ -4543,7 +4679,43 @@ function WalletsPanel({ data, toBase }) {
   );
 }
 
-function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell }) {
+function SellDeviceSheet({ item, onCancel, onConfirm }) {
+  const [buyerName, setBuyerName] = useState("");
+  const [dialCode, setDialCode] = useState("+222");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [salePrice, setSalePrice] = useState(item.price ? String(item.price) : "");
+  const [saleCurrency, setSaleCurrency] = useState(item.currency || "MRU");
+  const profit = (Number(salePrice) || 0) - (Number(item.cost) || 0) * (item.costCurrency === saleCurrency ? 1 : 0);
+  const go = (mode) => onConfirm({ buyerName: buyerName.trim(), dialCode, phone: phone.trim(), email: email.trim(), salePrice, saleCurrency, mode });
+  return (
+    <Sheet title={"🛒 بيع: " + item.name} onClose={onCancel}>
+      <Field label="اسم المشتري">
+        <input value={buyerName} onChange={(e) => setBuyerName(e.target.value)} placeholder="اسم الزبون" />
+      </Field>
+      <div className="sn-grid2">
+        <Field label="الهاتف"><input dir="ltr" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
+        <Field label="رمز الدولة"><input dir="ltr" value={dialCode} onChange={(e) => setDialCode(e.target.value)} /></Field>
+      </div>
+      <Field label="البريد الإلكتروني (اختياري)">
+        <input dir="ltr" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+      </Field>
+      <div className="sn-grid2">
+        <Field label="سعر بيع الجهاز"><input type="number" inputMode="decimal" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} /></Field>
+        <Field label="العملة"><select value={saleCurrency} onChange={(e) => setSaleCurrency(e.target.value)}>{CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}</select></Field>
+      </div>
+      {item.cost ? <p className="sn-hint">تكلفة شراء الجهاز: {money(item.cost)} {symbolOf(item.costCurrency)}.</p> : null}
+      <p className="sn-hint"><strong>أشحنه الآن</strong>: تُكمل بيانات الاشتراك فوراً ويصير زبوناً. <strong>قيد التركيب</strong>: يُسجَّل البيع وتشحنه لاحقاً.</p>
+      <div className="sn-sheet-actions">
+        <button className="sn-btn sn-btn--ghost" onClick={onCancel}>إلغاء</button>
+        <button className="sn-btn" style={{ background: "#1b2746", color: "#cfe0ff" }} disabled={!buyerName.trim()} onClick={() => go("pending")}>⏳ قيد التركيب</button>
+        <button className="sn-btn sn-btn--primary" disabled={!buyerName.trim()} onClick={() => go("now")}>⚡ أشحنه الآن</button>
+      </div>
+    </Sheet>
+  );
+}
+
+function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell, onSellDevice, onChargePending, onDeletePending }) {
   const [cat, setCat] = useState("device");
   const [name, setName] = useState("");
   const [qty, setQty] = useState("1");
@@ -4596,13 +4768,34 @@ function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell }) {
               <span className="sn-inv-sub">بيع {money(it.price)} {symbolOf(it.currency)}{it.cost ? ` • تكلفة ${money(it.cost)} ${symbolOf(it.costCurrency)}` : ""}</span>
             </div>
             <div className="sn-inv-acts">
-              <button className="sn-mini sn-mini--green" disabled={it.qty <= 0} onClick={() => { const c = window.prompt("اسم المشتري (اختياري):", "") || ""; onSell(it, c); }}>🛒 بيع</button>
+              {it.category === "device"
+                ? <button className="sn-mini sn-mini--green" disabled={it.qty <= 0} onClick={() => onSellDevice(it)}>🛒 بيع</button>
+                : <button className="sn-mini sn-mini--green" disabled={it.qty <= 0} onClick={() => { const c = window.prompt("اسم المشتري (اختياري):", "") || ""; onSell(it, c); }}>🛒 بيع</button>}
               <button className="sn-mini" onClick={() => onAdjust(it.id, 1)} title="زيادة">➕</button>
               <button className="sn-mini" onClick={() => onAdjust(it.id, -1)} title="إنقاص">➖</button>
               <button className="sn-mini sn-mini--red" onClick={() => onDelete(it.id)}>🗑️</button>
             </div>
           </div>
         ))
+      )}
+
+      {cat === "device" && (data.pendingInstalls || []).length > 0 && (
+        <div className="sn-pending-wrap">
+          <h4 className="sn-pending-title">⏳ قيد التركيب ({(data.pendingInstalls || []).length})</h4>
+          <p className="sn-hint">أجهزة بيعتها ولم تشحنها بعد. اضغط «شحن الآن» لإكمال بيانات الاشتراك — يتحوّل لزبون تقدر تجدّده.</p>
+          {(data.pendingInstalls || []).map((p) => (
+            <div className="sn-inv-row" key={p.id}>
+              <div className="sn-inv-info">
+                <span className="sn-inv-name">{p.buyerName || "بدون اسم"}</span>
+                <span className="sn-inv-sub">{p.itemName} • بيع {money(p.salePrice)} {symbolOf(p.saleCurrency)}{p.phone ? ` • ${p.dialCode || ""}${p.phone}` : ""} • {p.date}</span>
+              </div>
+              <div className="sn-inv-acts">
+                <button className="sn-mini sn-mini--green" onClick={() => onChargePending(p)}>⚡ شحن الآن</button>
+                <button className="sn-mini sn-mini--red" onClick={() => { if (window.confirm("حذف هذا البيع من قيد التركيب؟")) onDeletePending(p.id); }}>🗑️</button>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </>
   );
@@ -4743,26 +4936,41 @@ function ExpensesPanel({ data, toBase, onAdd, onDelete }) {
   );
 }
 
-function ConvertPanel({ rates }) {
+function ConvertPanel({ data }) {
+  const rates = (data.settings && data.settings.rates) || {};
+  const usd = Number(rates.USDT) || 430;
+  const list = [];
+  const seen = new Set();
+  const push = (code, label, rate) => { if (!code || seen.has(code)) return; seen.add(code); list.push({ code, label, rate }); };
+  push("MRU", "أوقية (MRU)", 1);
+  push("USDT", "دولار (USDT)", usd);
+  push("FCFA", "فرنك سيفا (FCFA)", Number(rates.FCFA) || 1);
+  (data.countries || []).forEach((c) => {
+    const pd = Number(c.perDollar) || 0;
+    if (c.currency && pd > 0) push(c.currency, `${c.currency} — ${c.name}`, usd / pd);
+  });
+  const rateOf = (code) => (list.find((x) => x.code === code) || { rate: 1 }).rate;
   const [amount, setAmount] = useState("");
   const [from, setFrom] = useState("USDT");
   const [to, setTo] = useState("MRU");
-  const base = (Number(amount) || 0) * (rates[from] ?? 1);
-  const out = base / (rates[to] ?? 1);
+  const base = (Number(amount) || 0) * rateOf(from);
+  const out = base / (rateOf(to) || 1);
   const swap = () => { setFrom(to); setTo(from); };
+  const opts = list.map((c) => <option key={c.code} value={c.code}>{c.label}</option>);
   return (
     <>
-      <p className="sn-hint" style={{ marginTop: 0 }}>تحويل سريع بين العملات حسب أسعارك في الإعدادات.</p>
+      <p className="sn-hint" style={{ marginTop: 0 }}>تحويل بين كل العملات التي تعاملت معها: الأساس + كل عملات الدول التي أضفت سعرها ({list.length} عملة).</p>
       <Field label="المبلغ"><input type="number" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
       <div className="sn-grid2">
-        <Field label="من"><select value={from} onChange={(e) => setFrom(e.target.value)}>{CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}</select></Field>
-        <Field label="إلى"><select value={to} onChange={(e) => setTo(e.target.value)}>{CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}</select></Field>
+        <Field label="من"><select value={from} onChange={(e) => setFrom(e.target.value)}>{opts}</select></Field>
+        <Field label="إلى"><select value={to} onChange={(e) => setTo(e.target.value)}>{opts}</select></Field>
       </div>
       <button className="sn-btn sn-full" onClick={swap}>🔁 عكس الاتجاه</button>
       <div className="sn-calc-out" style={{ marginTop: 12 }}>
         <div className="sn-calc-row sn-calc-total"><span>الناتج</span><strong className="sn-pos">{money(out)} {symbolOf(to)}</strong></div>
         <div className="sn-calc-row"><span>بالأوقية (الأساس)</span><strong>{money(base)} MRU</strong></div>
       </div>
+      <p className="sn-hint">أسعار عملات الدول تُحسب من سجل العملات (1$ = كذا)، وسعر الدولار من الإعدادات.</p>
     </>
   );
 }
@@ -4806,7 +5014,7 @@ function PriceCalc({ rates }) {
   );
 }
 
-function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, onDeleteCountry, onAddContact, onEditContact, onDeleteContact, onImportExcel, onImport, onRestoreTrash, onPurgeTrash, onEmptyTrash, onRestoreAuto, onAddExpense, onDeleteExpense, onAddService, onDeleteService, onAddInv, onAdjustInv, onDeleteInv, onSellInv, onAddOrder, onCycleOrder, onDeleteOrder }) {
+function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, onDeleteCountry, onAddContact, onEditContact, onDeleteContact, onImportExcel, onImport, onRestoreTrash, onPurgeTrash, onEmptyTrash, onRestoreAuto, onAddExpense, onDeleteExpense, onAddService, onDeleteService, onAddInv, onAdjustInv, onDeleteInv, onSellInv, onSellDevice, onChargePending, onDeletePending, onAddOrder, onCycleOrder, onDeleteOrder }) {
   const fileRef = useRef(null);
   const excelRef = useRef(null);
   const EXCEL_HEADERS = [
@@ -4947,9 +5155,9 @@ function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, 
   return (
     <Sheet title={titles[kind] || "أدوات"} onClose={onClose}>
       {kind === "calc" && <PriceCalc rates={data.settings.rates} />}
-      {kind === "convert" && <ConvertPanel rates={data.settings.rates} />}
+      {kind === "convert" && <ConvertPanel data={data} />}
       {kind === "services" && <ServicesPanel data={data} toBase={toBase} onAdd={onAddService} onDelete={onDeleteService} />}
-      {kind === "inventory" && <InventoryPanel data={data} onAdd={onAddInv} onAdjust={onAdjustInv} onDelete={onDeleteInv} onSell={onSellInv} />}
+      {kind === "inventory" && <InventoryPanel data={data} onAdd={onAddInv} onAdjust={onAdjustInv} onDelete={onDeleteInv} onSell={onSellInv} onSellDevice={onSellDevice} onChargePending={onChargePending} onDeletePending={onDeletePending} />}
       {kind === "orders" && <OrdersPanel data={data} onAdd={onAddOrder} onCycle={onCycleOrder} onDelete={onDeleteOrder} />}
       {kind === "wallets" && <WalletsPanel data={data} toBase={toBase} />}
       {kind === "calendar" && <CalendarPanel data={data} />}
@@ -5011,11 +5219,14 @@ function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, 
 
       {kind === "backup" && (
         <>
+          <div className="sn-end-preview" style={{ background: "rgba(52,211,153,.1)", borderColor: "rgba(52,211,153,.3)", color: "#bfedd6" }}>
+            ☁️ بياناتك تُحفظ تلقائياً في السحابة عند كل تغيير، وتظهر على كل أجهزتك بعد تسجيل الدخول. النسخ أدناه إضافية (احتياط على ملف/درايف).
+          </div>
           <div className="sn-grid2">
             <button className="sn-btn sn-btn--ghost" onClick={exportData}>⬇️ تصدير ملف</button>
             <button className="sn-btn sn-btn--ghost" onClick={() => fileRef.current?.click()}>⬆️ استيراد ملف</button>
           </div>
-          <button className="sn-btn sn-btn--primary sn-full" style={{ marginTop: 10 }} onClick={shareData}>📤 مشاركة النسخة (إلى درايف…)</button>
+          <button className="sn-btn sn-btn--primary sn-full" style={{ marginTop: 10 }} onClick={shareData}>📤 مشاركة/حفظ النسخة (درايف، واتساب…)</button>
           {onRestoreAuto && (
             <button className="sn-btn sn-btn--ghost sn-full" style={{ marginTop: 10 }} onClick={onRestoreAuto}>
               ☁️ استعادة آخر نسخة تلقائية
@@ -5047,7 +5258,7 @@ function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, 
             📥 استيراد من نص (مزامنة بين هاتفين)
           </button>
           <input ref={fileRef} type="file" accept="application/json" hidden onChange={importData} />
-          <p className="sn-hint">للمزامنة بين هاتفين: في الأول «📋 نسخ بيانات المزامنة»، أرسل النص (واتساب مثلاً)، وفي الثاني «📥 استيراد من نص». للحفظ على درايف: «📤 مشاركة النسخة» ← Google Drive. (المزامنة التلقائية اللحظية تحتاج خادماً — في التطبيق الثاني.)</p>
+          <p className="sn-hint">للحفظ على Google Drive: اضغط «📤 مشاركة/حفظ النسخة» ثم اختر <strong>Drive</strong> من قائمة المشاركة (أو احفظ الملف ثم ارفعه يدوياً لدرايف). إن لم يظهر درايف: استعمل «⬇️ تصدير ملف» — يُنزَّل ملف، افتح تطبيق Drive وارفعه. للمزامنة بين هاتفين فالأسهل تسجيل الدخول بنفس الحساب (تتم تلقائياً)، أو «📋 نسخ بيانات المزامنة» ← «📥 استيراد من نص».</p>
         </>
       )}
 
@@ -5567,6 +5778,8 @@ const CSS = `
 .sn-inv-qty.out{color:var(--bad);border-color:rgba(244,63,94,.4)}
 .sn-inv-sub{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}
 .sn-inv-acts{display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;max-width:50%}
+.sn-pending-wrap{margin-top:18px;padding-top:14px;border-top:1px dashed #2a3b63}
+.sn-pending-title{margin:0 0 6px;color:#ffd27a;font-size:15px}
 .sn-goal{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:12px}
 .sn-goal-top{display:flex;justify-content:space-between;font-weight:800;font-size:13.5px;margin-bottom:8px}
 .sn-goal-pct{color:var(--gold)}
@@ -5625,6 +5838,14 @@ const CSS = `
 .sn-cal-wd{text-align:center;font-size:10.5px;color:var(--muted);font-weight:700;padding:3px 0}
 .sn-cal-day{position:relative;aspect-ratio:1;border:1px solid var(--border);background:var(--surface2);border-radius:9px;color:var(--text);font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit}
 .sn-cal-day.has{border-color:var(--bad)}
+.sn-cal-day.has-ok{border-color:var(--ok);background:rgba(52,211,153,.12)}
+.sn-cal-day.has-soon{border-color:var(--warn);background:rgba(251,191,36,.12)}
+.sn-cal-day.has-expired{border-color:var(--bad);background:rgba(251,113,133,.12)}
+.sn-cal-dev{background:var(--surface2);border:1px solid var(--border);border-radius:11px;padding:9px 11px;margin-bottom:7px}
+.sn-cal-dev-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sn-cal-dev-info{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.sn-cal-dev-name{font-weight:700;font-size:13.5px}
+.sn-cal-dev-body{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);font-size:12.5px;color:#cdd6f4;display:flex;flex-direction:column;gap:4px}
 .sn-cal-day.is-today{outline:2px solid var(--accent)}
 .sn-cal-day.is-sel{background:var(--accent);color:#fff}
 .sn-cal-badge{position:absolute;top:-5px;left:-5px;min-width:18px;height:18px;background:var(--bad);color:#fff;border-radius:9px;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0 4px}
