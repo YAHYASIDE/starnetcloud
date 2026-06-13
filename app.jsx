@@ -4272,12 +4272,19 @@ function AgentView({ agent, data, settings }) {
         const st = statusOf(d);
         const dl = diffDays(todayStr(), d.endDate);
         const debt = Number(d.debt) || 0;
+        const telNum = ((d.dialCode || "") + (d.phone || "")).replace(/\D/g, "");
         const notes = [].concat(d.originNote ? [d.originNote] : [], Array.isArray(d.notes) ? d.notes : []).filter(Boolean);
         return (
           <div key={d.id} style={box}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div style={{ fontWeight: 900, fontSize: 15 }}>{d.name || "بدون اسم"}{d.account ? ` — ${d.account}` : ""}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ fontWeight: 900, fontSize: 15 }}>{d.customerName || "بدون اسم"}</div>
               <span style={{ background: stColor(st.key) + "22", color: stColor(st.key), borderRadius: 8, padding: "3px 9px", fontSize: 12, fontWeight: 800 }}>{st.label}</span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
+              {d.accountNumber ? <span style={{ background: "#0c1530", borderRadius: 8, padding: "3px 8px" }}>🔢 {d.accountNumber}</span> : null}
+              {d.phone ? <span style={{ background: "#0c1530", borderRadius: 8, padding: "3px 8px" }} dir="ltr">📞 {d.phone}</span> : null}
+              {d.email ? <span style={{ background: "#0c1530", borderRadius: 8, padding: "3px 8px" }} dir="ltr">📧 {d.email}</span> : null}
+              {d.package ? <span style={{ background: "#1b2746", color: "#a9c2ff", borderRadius: 8, padding: "3px 8px" }}>🗂️ {d.package}</span> : null}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <div><div style={lbl}>ينتهي</div><div style={val}>{d.endDate || "—"}{!d.broken && dl >= 0 ? ` (${dl} يوم)` : ""}</div></div>
@@ -4288,6 +4295,10 @@ function AgentView({ agent, data, settings }) {
             {notes.length > 0 && (
               <div style={{ marginTop: 8 }}><div style={lbl}>ملاحظات</div><div style={{ color: "#cdd6f4", fontSize: 13 }}>{notes.join(" • ")}</div></div>
             )}
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button onClick={() => openWhatsApp(d, "reminder", settings, customerBalance(d, data, settings.rates))} style={{ flex: 1, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 10, padding: "9px", fontFamily: "inherit", fontWeight: 800, fontSize: 13 }}>📲 تذكير واتساب</button>
+              {telNum && <button onClick={() => window.open("tel:" + telNum)} style={{ background: "#1b2746", color: "#a9c2ff", border: "1px solid #2a3a5e", borderRadius: 10, padding: "9px 14px", fontFamily: "inherit", fontWeight: 800, fontSize: 13 }}>📞</button>}
+            </div>
           </div>
         );
       })}
