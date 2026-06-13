@@ -1,0 +1,131 @@
+<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8" />
+<script>
+window.__showErr = function (msg) {
+  try {
+    var b = document.getElementById("errbox");
+    if (!b) { b = document.createElement("div"); b.id = "errbox"; (document.body || document.documentElement).appendChild(b); }
+    b.style.cssText = "position:fixed;inset:0;z-index:100000;background:#0a1024;color:#fca5a5;font:12px/1.55 monospace;padding:16px;white-space:pre-wrap;word-break:break-word;overflow:auto;direction:ltr;text-align:left";
+    b.textContent = "\u26A0\uFE0F خطأ في التطبيق:\n\n" + msg + "\n\n(صوّر هذه الشاشة وأرسلها)";
+  } catch (e) {}
+};
+window.addEventListener("error", function (ev) {
+  var m = (ev && ev.message) || "";
+  if (ev && ev.filename) m += "\n@ " + ev.filename + " : line " + ev.lineno + " : col " + ev.colno;
+  if (ev && ev.error && ev.error.stack) m += "\n\n" + ev.error.stack;
+  window.__showErr(m || "script error");
+});
+window.addEventListener("unhandledrejection", function (ev) {
+  var r = ev && ev.reason;
+  window.__showErr("promise: " + ((r && (r.stack || r.message)) || r));
+});
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#0a1024" />
+<title>STAR NET ⭐ سحابي</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<style>
+html,body{margin:0;padding:0;background:#0a1024;min-height:100vh;font-family:Tajawal,Tahoma,sans-serif}
+#root{min-height:100vh}
+#topbar{display:none;position:fixed;top:0;inset-inline:0;height:34px;align-items:center;justify-content:space-between;gap:8px;padding:2px 10px;background:#0d1430;border-bottom:1px solid #1e2a4a;z-index:9998;font-size:11px;color:#9fb0d0}
+#topbar .who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46%}
+#topbar .st{flex:1;text-align:center;color:#6ee7b7}
+#topbar button{background:#1e2a4a;color:#fca5a5;border:none;border-radius:8px;padding:5px 10px;font-family:inherit;font-weight:800;font-size:11px}
+body.signed #root{padding-top:34px}
+#login{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a1024;color:#e7ecf6;gap:14px;padding:24px}
+#login h1{margin:6px 0 0;font-size:24px;letter-spacing:1px}
+#login p.sub{margin:0;color:#8b95ac;font-size:13px}
+.card{width:100%;max-width:360px;background:#111a36;border:1px solid #243352;border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:12px}
+.card label{font-size:12px;color:#9fb0d0;margin-bottom:-6px}
+.card input{background:#0c1530;border:1px solid #2a3a5e;border-radius:12px;padding:13px 14px;color:#fff;font-family:inherit;font-size:15px;direction:ltr;text-align:left}
+.card input:focus{outline:none;border-color:#6aa2ff}
+.btn{width:100%;border:none;border-radius:12px;padding:13px;font-family:inherit;font-weight:800;font-size:15px}
+.btn-in{background:linear-gradient(135deg,#5b8cff,#7c5cff);color:#fff}
+.btn:disabled{opacity:.5}
+#login-err{display:none;background:rgba(244,63,94,.12);border:1px solid rgba(244,63,94,.4);color:#fca5a5;border-radius:10px;padding:9px 12px;font-size:13px;text-align:center}
+.hint{color:#7b86a0;font-size:11.5px;text-align:center;line-height:1.7}
+.star{font-size:46px}
+</style>
+</head>
+<body>
+<div id="topbar"><span class="who" id="whoami"></span><span class="st" id="sync-status">✓ متّصل</span><button onclick="window.__logout&&window.__logout()">🚪 خروج</button></div>
+<div id="root"></div>
+<div id="login">
+<div class="star">⭐</div>
+<h1>STAR NET</h1>
+<p class="sub">إدارة اشتراكات ستارلينك — نسخة سحابية</p>
+<div class="card">
+<div id="login-err"></div>
+<label>البريد الإلكتروني</label>
+<input id="email" type="email" inputmode="email" autocomplete="username" placeholder="you@email.com" />
+<label>كلمة المرور</label>
+<input id="pass" type="password" autocomplete="current-password" placeholder="••••••••" />
+<button class="btn btn-in" id="btn-in">دخول</button>
+<p class="hint">الدخول للحسابات المصرّح بها فقط 🔒</p>
+</div>
+</div>
+
+<script>
+window.__state = { authReady:false, mountFn:null, mounted:false };
+window.__tryMount = function(){ var s=window.__state; if(s.authReady && s.mountFn && !s.mounted){ s.mounted=true; s.mountFn(); document.body.classList.add('signed'); } };
+</script>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin></script>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig={apiKey:"AIzaSyDDmM2KQV8FoMK0SbK6-yXC1eY41VH0Nl8",authDomain:"yahyanajim-92897.firebaseapp.com",projectId:"yahyanajim-92897",storageBucket:"yahyanajim-92897.firebasestorage.app",messagingSenderId:"894821585663",appId:"1:894821585663:web:597ff582d6034eea88f2ca"};
+
+// الحسابات المصرّح لها بالدخول فقط
+const ALLOWED = ["yahyaazawadi91@gmail.com","etssadaga6@gmail.com","etssadaga@gmail.com"];
+
+const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=(id)=>document.getElementById(id);
+function showErr(m){const e=$("login-err");e.textContent=m||"";e.style.display=m?"block":"none";}
+function busy(b){$("btn-in").disabled=b;}
+function mapErr(c){const m={"auth/invalid-email":"البريد غير صحيح","auth/missing-password":"أدخل كلمة المرور","auth/invalid-credential":"البريد أو كلمة المرور غير صحيحة","auth/user-not-found":"لا يوجد حساب بهذا البريد","auth/wrong-password":"كلمة المرور غير صحيحة","auth/network-request-failed":"تحقّق من الإنترنت","auth/too-many-requests":"محاولات كثيرة، انتظر قليلاً"};return m[c]||("خطأ: "+c);}
+$("btn-in").addEventListener("click",async()=>{showErr("");busy(true);try{await signInWithEmailAndPassword(auth,$("email").value.trim(),$("pass").value);}catch(e){showErr(mapErr(e.code));}busy(false);});
+window.__logout=()=>{try{signOut(auth);}catch(e){}};
+
+// التخزين السحابي المشترك: مستند واحد business/main يصل إليه الثلاثة
+const SHARED=doc(db,"business","main");
+let cache={},saveTimer=null;
+function scheduleSave(){const st=$("sync-status");if(st){st.textContent="… يحفظ";st.style.color="#fbbf24";}clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{try{await setDoc(SHARED,cache);if(st){st.textContent="✓ محفوظ سحابياً";st.style.color="#6ee7b7";}}catch(e){console.error(e);if(st){st.textContent="⚠️ تعذّر الحفظ";st.style.color="#fca5a5";}}},700);}
+function setupStorage(uid){window.storage={async get(k){if(k==="starnet_autobackup"){try{const v=localStorage.getItem("sn_bk");return v==null?null:{key:k,value:v};}catch(e){return null;}}return(k in cache&&cache[k]!=null)?{key:k,value:cache[k]}:null;},async set(k,v){if(k==="starnet_autobackup"){try{localStorage.setItem("sn_bk",v);}catch(e){}return{key:k,value:v};}cache[k]=v;scheduleSave();return{key:k,value:v};},async delete(k){delete cache[k];scheduleSave();return{key:k,deleted:true};},async list(p){return{keys:Object.keys(cache).filter(x=>!p||x.startsWith(p)),prefix:p};}};}
+
+onAuthStateChanged(auth,async(user)=>{
+  if(user){
+    const email=(user.email||"").toLowerCase();
+    if(!ALLOWED.includes(email)){ showErr("هذا الحساب غير مصرّح له بالدخول"); try{await signOut(auth);}catch(e){} return; }
+    // تحميل البيانات المشتركة + ترحيل بيانات المالك القديمة مرّة واحدة إن لزم
+    try{
+      const s=await getDoc(SHARED); cache=s.exists()?(s.data()||{}):{};
+      if(!cache || !cache["starnet_data_v1"]){
+        try{ const old=await getDoc(doc(db,"users",user.uid)); if(old.exists() && old.data() && old.data()["starnet_data_v1"]){ cache=old.data(); await setDoc(SHARED,cache); } }catch(e){}
+      }
+    }catch(e){console.error(e);cache={};}
+    setupStorage(user.uid);
+    const w=$("whoami"); if(w) w.textContent=user.email||"مستخدم";
+    window.__userEmail=email;
+    window.__state.authReady=true; window.__tryMount();
+    $("login").style.display="none"; $("topbar").style.display="flex";
+  } else {
+    window.__state.authReady=false; window.__state.mounted=false; window.__userEmail=null;
+    document.body.classList.remove("signed");
+    $("login").style.display="flex"; $("topbar").style.display="none";
+    const r=$("root"); if(r) r.innerHTML=""; cache={};
+  }
+});
+</script>
+
+<script type="text/babel" src="app.jsx?v=11" data-presets="react"></script>
+</body>
+</html>
