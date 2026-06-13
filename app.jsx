@@ -1123,7 +1123,16 @@ function StarNetApp() {
       if (info.mode === "pending") {
         pendingInstalls = [{ id: uid(), itemName: item.name, buyerName: info.buyerName || "", dialCode: info.dialCode || "+222", phone: info.phone || "", email: info.email || "", salePrice: Number(info.salePrice) || 0, saleCurrency: info.saleCurrency || "MRU", date: todayStr() }, ...pendingInstalls];
       }
-      return { ...d, inventory, transactions: txs, pendingInstalls };
+      // حفظ المشتري في دفتر العملاء تلقائياً
+      let contacts = d.contacts || [];
+      const bn = (info.buyerName || "").trim();
+      if (bn) {
+        const cData = { name: bn, dialCode: info.dialCode || "+222", phone: info.phone || "", email: info.email || "", currency: info.saleCurrency || "MRU" };
+        const ci = contacts.findIndex((c) => (c.name || "").trim().toLowerCase() === bn.toLowerCase());
+        if (ci >= 0) contacts = contacts.map((c, i) => (i === ci ? { ...c, ...cData } : c));
+        else contacts = [...contacts, { ...cData, id: uid(), createdAt: todayStr(), note: "مشترٍ جهاز من المتجر" }];
+      }
+      return { ...d, inventory, transactions: txs, pendingInstalls, contacts };
     });
     setSellingItem(null);
     if (info.mode === "now") {
@@ -1137,11 +1146,18 @@ function StarNetApp() {
   // شحن جهاز كان قيد التركيب → يفتح نموذج إضافة جهاز كاملاً مملوءاً ببيانات المشتري
   function chargePending(p) {
     setChargingPendingId(p.id);
+    setPanel(null);
     setEditing({ customerName: p.buyerName || "", dialCode: p.dialCode || "+222", phone: p.phone || "", email: p.email || "", currency: p.saleCurrency || "MRU" });
   }
   function deletePending(id) {
     setData((d) => ({ ...d, pendingInstalls: (d.pendingInstalls || []).filter((p) => p.id !== id) }));
     flash("حُذف من قيد التركيب");
+  }
+  // حذف عملية بيع من المتجر (يزيل دخلها وتكلفتها فيختفي ربحها)
+  function deleteSale(saleId) {
+    setData((d) => ({ ...d, transactions: (d.transactions || []).filter((t) => t.saleId !== saleId) }));
+    flash("حُذفت عملية البيع وأُزيل ربحها 🗑️");
+    playSound("delete");
   }
 
   function addOrder(info) {
@@ -1599,9 +1615,10 @@ function StarNetApp() {
           onAdjustInv={adjustInvQty}
           onDeleteInv={deleteInvItem}
           onSellInv={sellInvItem}
-          onSellDevice={(it) => setSellingItem(it)}
+          onSellDevice={(it) => { setPanel(null); setSellingItem(it); }}
           onChargePending={chargePending}
           onDeletePending={deletePending}
+          onDeleteSale={deleteSale}
           onAddOrder={addOrder}
           onCycleOrder={cycleOrder}
           onDeleteOrder={deleteOrder}
@@ -2740,6 +2757,8 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
             {d.cost > 0 && <CField k="التكلفة بالدولار" v={`${money(d.cost)} $`} />}
             {d.cost > 0 && <CField k="الدفع للمورّد" v={d.broken ? "ملغى (تعطّل)" : d.costPaid ? "مدفوع ✅" : "غير مدفوع"} danger={!d.costPaid && !d.broken} />}
             {agent && <CField k="المندوب" v={`${agent.name} (${agent.percent || 0}%)`} />}
+            {d.package && <CField k="الباقة" v={d.package} />}
+            {d.referredBy && <CField k="من أحاله" v={d.referredBy} />}
           </div>
 
           <button className="sn-collapse-h" onClick={() => setShowSecret(!showSecret)}>
@@ -4739,8 +4758,9 @@ function SellDeviceSheet({ item, onCancel, onConfirm }) {
   );
 }
 
-function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell, onSellDevice, onChargePending, onDeletePending }) {
+function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell, onSellDevice, onChargePending, onDeletePending, onDeleteSale }) {
   const [cat, setCat] = useState("device");
+  const [showSales, setShowSales] = useState(false);
   const [name, setName] = useState("");
   const [qty, setQty] = useState("1");
   const [cost, setCost] = useState("");
@@ -4749,6 +4769,24 @@ function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell, onSellDevice,
   const [currency, setCurrency] = useState("MRU");
   const items = (data.inventory || []).filter((it) => it.category === cat);
   const totalQty = items.reduce((s, it) => s + (Number(it.qty) || 0), 0);
+  // سجل المبيعات (أجهزة واكسسوارات) مجمّع حسب رقم العملية مع الربح
+  const sales = (() => {
+    const rates = (data.settings && data.settings.rates) || {};
+    const tb = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
+    const byId = {};
+    (data.transactions || []).forEach((t) => {
+      if (!t.saleId) return;
+      if (["بيع جهاز", "بيع مخزون", "تكلفة جهاز", "تكلفة مخزون"].includes(t.type)) (byId[t.saleId] = byId[t.saleId] || []).push(t);
+    });
+    return Object.entries(byId).map(([sid, txs]) => {
+      const inc = txs.find((t) => t.type === "بيع جهاز" || t.type === "بيع مخزون");
+      const cst = txs.find((t) => t.type === "تكلفة جهاز" || t.type === "تكلفة مخزون");
+      if (!inc) return null;
+      const profit = tb(inc.amount, inc.currency) - (cst ? tb(cst.amount, cst.currency) : 0);
+      const isDev = inc.type === "بيع جهاز" || inc.note === "جهاز";
+      return { sid, name: inc.service || "—", buyer: inc.customerName || "", price: inc.amount, currency: inc.currency, profit, date: inc.date, isDev };
+    }).filter(Boolean).sort((a, b) => (a.date < b.date ? 1 : -1));
+  })();
   const add = () => {
     if (!name.trim()) return;
     onAdd({ name: name.trim(), category: cat, qty, cost, costCurrency, price, currency });
@@ -4819,6 +4857,24 @@ function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell, onSellDevice,
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {sales.length > 0 && (
+        <div className="sn-pending-wrap">
+          <button className="sn-collapse-h" onClick={() => setShowSales((v) => !v)}>
+            <span>🧾 سجل المبيعات ({sales.length})</span>
+            <span>{showSales ? "▾" : "◂"}</span>
+          </button>
+          {showSales && sales.map((s) => (
+            <div className="sn-inv-row" key={s.sid}>
+              <div className="sn-inv-info">
+                <span className="sn-inv-name">{s.isDev ? "📡" : "🔌"} {s.name}{s.buyer ? ` — ${s.buyer}` : ""}</span>
+                <span className="sn-inv-sub">بيع {money(s.price)} {symbolOf(s.currency)} • ربح {money(s.profit)} عملة • {s.date}</span>
+              </div>
+              <button className="sn-mini sn-mini--red" onClick={() => { if (window.confirm("حذف عملية البيع؟ سيُزال ربحها من الحسابات.")) onDeleteSale(s.sid); }}>🗑️</button>
+            </div>
+          ))}
+          {showSales && <p className="sn-hint">حذف عملية بيع يُزيل دخلها وتكلفتها فيختفي ربحها من التقارير. (لا يحذف الزبون إن كان قد صار جهازاً.)</p>}
         </div>
       )}
     </>
@@ -5038,7 +5094,7 @@ function PriceCalc({ rates }) {
   );
 }
 
-function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, onDeleteCountry, onAddContact, onEditContact, onDeleteContact, onImportExcel, onImport, onRestoreTrash, onPurgeTrash, onEmptyTrash, onRestoreAuto, onAddExpense, onDeleteExpense, onAddService, onDeleteService, onAddInv, onAdjustInv, onDeleteInv, onSellInv, onSellDevice, onChargePending, onDeletePending, onAddOrder, onCycleOrder, onDeleteOrder }) {
+function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, onDeleteCountry, onAddContact, onEditContact, onDeleteContact, onImportExcel, onImport, onRestoreTrash, onPurgeTrash, onEmptyTrash, onRestoreAuto, onAddExpense, onDeleteExpense, onAddService, onDeleteService, onAddInv, onAdjustInv, onDeleteInv, onSellInv, onSellDevice, onChargePending, onDeletePending, onDeleteSale, onAddOrder, onCycleOrder, onDeleteOrder }) {
   const fileRef = useRef(null);
   const excelRef = useRef(null);
   const EXCEL_HEADERS = [
@@ -5181,7 +5237,7 @@ function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, 
       {kind === "calc" && <PriceCalc rates={data.settings.rates} />}
       {kind === "convert" && <ConvertPanel data={data} />}
       {kind === "services" && <ServicesPanel data={data} toBase={toBase} onAdd={onAddService} onDelete={onDeleteService} />}
-      {kind === "inventory" && <InventoryPanel data={data} onAdd={onAddInv} onAdjust={onAdjustInv} onDelete={onDeleteInv} onSell={onSellInv} onSellDevice={onSellDevice} onChargePending={onChargePending} onDeletePending={onDeletePending} />}
+      {kind === "inventory" && <InventoryPanel data={data} onAdd={onAddInv} onAdjust={onAdjustInv} onDelete={onDeleteInv} onSell={onSellInv} onSellDevice={onSellDevice} onChargePending={onChargePending} onDeletePending={onDeletePending} onDeleteSale={onDeleteSale} />}
       {kind === "orders" && <OrdersPanel data={data} onAdd={onAddOrder} onCycle={onCycleOrder} onDelete={onDeleteOrder} />}
       {kind === "wallets" && <WalletsPanel data={data} toBase={toBase} />}
       {kind === "calendar" && <CalendarPanel data={data} />}
