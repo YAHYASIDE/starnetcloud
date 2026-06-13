@@ -4230,10 +4230,12 @@ function CountryForm({ initial, onCancel, onSave }) {
 
 function AgentView({ agent, data, settings }) {
   const myDevices = (data.devices || []).filter((d) => d.agentId === agent.id);
+  const rates = (settings && settings.rates) || {};
+  const toBase = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
   const activeCount = myDevices.filter((d) => !d.broken && diffDays(todayStr(), d.endDate) >= 0).length;
   const brokenCount = myDevices.filter((d) => d.broken).length;
   let totalDebt = 0;
-  myDevices.forEach((d) => { if (Number(d.debt) > 0) totalDebt += tb(Number(d.debt), d.debtCurrency || d.currency || "MRU"); });
+  myDevices.forEach((d) => { if (Number(d.debt) > 0) totalDebt += toBase(Number(d.debt), d.debtCurrency || d.currency || "MRU"); });
   const paidToMe = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
 
   const stColor = (k) => k === "active" ? "#34d399" : (k === "soon" || k === "urgent") ? "#fbbf24" : "#fb7185";
@@ -4261,7 +4263,7 @@ function AgentView({ agent, data, settings }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
         <div style={{ ...box, marginBottom: 0 }}><div style={lbl}>إجمالي ديون زبائني</div><div style={{ ...val, color: totalDebt > 0 ? "#fb7185" : "#34d399" }}>{money(Math.round(totalDebt))} عملة</div></div>
-        <div style={{ ...box, marginBottom: 0 }}><div style={lbl}>ما استلمته منك</div><div style={val}>{money(Math.round(paidToMe))} عملة</div></div>
+        <div style={{ ...box, marginBottom: 0 }}><div style={lbl}>المبلغ المُسلّم لك</div><div style={val}>{money(Math.round(paidToMe))} عملة</div></div>
       </div>
 
       {myDevices.length === 0 && (
