@@ -550,6 +550,23 @@ function StarNetApp() {
   const [editingContact, setEditingContact] = useState(null); // contact | "new" | null
   const [viewAgent, setViewAgent] = useState(null); // agent being viewed
   const [confirm, setConfirm] = useState(null); // {text, onYes}
+
+  // رجوع خطوة للوراء: يغلق أعلى نافذة مفتوحة، وإلا يعود للرئيسية
+  const goBack = () => {
+    if (editing) { setEditing(null); setChargingPendingId(null); return; }
+    if (sellingItem) { setSellingItem(null); return; }
+    if (renewing) { setRenewing(null); return; }
+    if (collecting) { setCollecting(null); return; }
+    if (payingSupplier) { setPayingSupplier(null); return; }
+    if (editingContact) { setEditingContact(null); return; }
+    if (editingAgent) { setEditingAgent(null); return; }
+    if (editingCountry) { setEditingCountry(null); return; }
+    if (viewAgent) { setViewAgent(null); return; }
+    if (confirm) { setConfirm(null); return; }
+    if (panel) { setPanel(null); return; }
+    if (drawer) { setDrawer(false); return; }
+    if (tab !== "dashboard") { setTab("dashboard"); return; }
+  };
   const [toast, setToast] = useState("");
   const [locked, setLocked] = useState(false);
   const [undoSnap, setUndoSnap] = useState(null); // {data, label}
@@ -1537,6 +1554,13 @@ function StarNetApp() {
         )}
       </main>
 
+      {/* زر رجوع دائم */}
+      <button
+        onClick={goBack}
+        aria-label="رجوع خطوة"
+        style={{ position: "fixed", insetInlineStart: 14, bottom: 84, padding: "9px 15px", borderRadius: 22, border: "1px solid #2a3a5e", background: "rgba(17,26,54,.95)", color: "#a9c2ff", fontFamily: "inherit", fontSize: 13.5, fontWeight: 800, boxShadow: "0 6px 18px rgba(0,0,0,.45)", zIndex: 70, cursor: "pointer" }}
+      >‹ رجوع</button>
+
       {/* شريط التنقل السفلي */}
       <nav className="sn-tabs">
         {[
@@ -2427,7 +2451,7 @@ function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkP
       if (filter.startsWith("pkg:") && (d.package || "") !== filter.slice(4)) return false;
       if (q) {
         const num = numberOf(d, data.personNumbers);
-        const hay = `${d.customerName} ${d.phone} ${d.accountNumber} ${d.email} ${num ? "#" + num : ""}`.toLowerCase();
+        const hay = `${d.customerName} ${d.phone} ${d.accountNumber} ${d.email} ${d.kit || ""} ${d.supplier || ""} ${num ? "#" + num : ""}`.toLowerCase();
         if (!hay.includes(q.toLowerCase())) return false;
       }
       return true;
@@ -2759,6 +2783,7 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
             {agent && <CField k="المندوب" v={`${agent.name} (${agent.percent || 0}%)`} />}
             {d.package && <CField k="الباقة" v={d.package} />}
             {d.referredBy && <CField k="من أحاله" v={d.referredBy} />}
+            {d.supplier && <CField k="المورّد" v={d.supplier} />}
           </div>
 
           <button className="sn-collapse-h" onClick={() => setShowSecret(!showSecret)}>
@@ -2767,6 +2792,7 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
           </button>
           {showSecret && (
             <div className="sn-grid2v">
+              {d.kit && <CField k="KIT (معرّف الجهاز)" v={d.kit} copy={d.kit} onCopy={onCopy} />}
               <CField k="رقم الحساب" v={d.accountNumber} copy={d.accountNumber} onCopy={onCopy} />
               <CField k="البريد الإلكتروني" v={d.email} copy={d.email} onCopy={onCopy} />
               <CField k="مرور الواي فاي" v={d.wifiPassword} copy={d.wifiPassword} onCopy={onCopy} secret />
@@ -2943,11 +2969,14 @@ function Reports({ data, toBase, settings }) {
 
   const agg = useMemo(() => {
     let dayP = 0, monthP = 0, allP = 0, monthRevenue = 0, debt = 0, supplierUnpaid = 0;
+    let storeP = 0, chargeP = 0;
     const byCur = {};
     const byCurExp = {};
     data.transactions.forEach((tr) => {
       const profit = txProfit(tr, toBase);
       allP += profit;
+      if (["بيع جهاز", "بيع مخزون", "تكلفة جهاز", "تكلفة مخزون"].includes(tr.type)) storeP += profit;
+      else if (["شحن", "تجديد", "تسديد دين", "دفع للمورّد"].includes(tr.type)) chargeP += profit;
       if (tr.date === t) dayP += profit;
       if (tr.date.slice(0, 7) === month) {
         monthP += profit;
@@ -2970,7 +2999,7 @@ function Reports({ data, toBase, settings }) {
       if (ap > 0) agentsShare += ap * (Number(a.percent) || 0) / 100;
     });
     const myNet = allP - agentsShare;
-    return { dayP, monthP, allP, monthRevenue, debt, supplierUnpaid, byCur, byCurExp, agentsShare, myNet };
+    return { dayP, monthP, allP, monthRevenue, debt, supplierUnpaid, byCur, byCurExp, agentsShare, myNet, storeP, chargeP };
   }, [data, toBase, t]);
 
   // أفضل الزبائن + إحصاء الدول + مقارنة الشهر بالماضي
@@ -3163,6 +3192,11 @@ function Reports({ data, toBase, settings }) {
       </div>
 
       <div className="sn-mini-grid sn-mini-grid--2">
+        <MiniStat label="🛒 أرباح المتجر (بيع الأجهزة والاكسسوارات)" val={`${money(agg.storeP)} عملة`} danger={agg.storeP < 0} />
+        <MiniStat label="📡 أرباح شحن الأجهزة (الاشتراكات)" val={`${money(agg.chargeP)} عملة`} danger={agg.chargeP < 0} />
+      </div>
+
+      <div className="sn-mini-grid sn-mini-grid--2">
         <MiniStat label="صافي ربحي وحدي" val={`${money(agg.myNet)} عملة`} danger={agg.myNet < 0} />
         <MiniStat label="صافي وضعنا (بعد المورّد)" val={`${money(agg.allP - agg.supplierUnpaid)} عملة`} danger={agg.allP - agg.supplierUnpaid < 0} />
       </div>
@@ -3329,6 +3363,8 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
           tag: initial.tag || "",
           package: initial.package || "",
           referredBy: initial.referredBy || "",
+          kit: initial.kit || "",
+          supplier: initial.supplier || "",
           photos: initial.photos || [],
           audio: initial.audio || "",
           notes: asNotes(initial.notes),
@@ -3361,6 +3397,8 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
           tag: "",              // وسم الزبون (VIP/جملة/تجزئة)
           package: "",          // نوع الباقة
           referredBy: "",       // من أحال هذا الزبون
+          kit: "",              // معرّف الجهاز KIT
+          supplier: "",         // اسم المورّد
           notes: [],
         }
   );
@@ -3636,6 +3674,9 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
       <Field label="رقم الحساب">
         <input dir="ltr" value={f.accountNumber} onChange={(e) => set("accountNumber", e.target.value)} />
       </Field>
+      <Field label="KIT (معرّف الجهاز)">
+        <input dir="ltr" value={f.kit || ""} onChange={(e) => set("kit", e.target.value)} placeholder="رقم/معرّف الـ KIT لتمييز كل جهاز" />
+      </Field>
       <div className="sn-grid2">
         <Field label="كلمة مرور الواي فاي">
           <input dir="ltr" value={f.wifiPassword} onChange={(e) => set("wifiPassword", e.target.value)} />
@@ -3730,6 +3771,9 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
       </Field>
 
       {/* (3) الدفع للمورّد */}
+      <Field label="المورّد (الذي تستلف منه أو تدفع له)">
+        <input value={f.supplier || ""} onChange={(e) => set("supplier", e.target.value)} placeholder="اسم المورّد" />
+      </Field>
       <div className="sn-supplier-box">
         <label className="sn-switch">
           <input type="checkbox" checked={f.costPaid} onChange={(e) => set("costPaid", e.target.checked)} />
