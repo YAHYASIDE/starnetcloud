@@ -666,6 +666,10 @@ function StarNetApp() {
     setData((d) => {
       const endDate = addDays(form.startDate, form.durationDays);
       const dev = { ...form, endDate };
+      const hwCost = Number(form._hwCost) || 0;       // تكلفة شراء الجهاز (من المتجر) — تُطرح مرّة واحدة
+      const hwCur = form._hwCostCur || "USDT";
+      const storeItem = form._storeItem || "";
+      delete dev._hwCost; delete dev._hwCostCur; delete dev._storeItem;
       let devices, transactions = [...d.transactions];
       const expenseTx = () => ({
         id: uid(),
@@ -697,6 +701,10 @@ function StarNetApp() {
           const e = expenseTx();
           e.deviceId = dev.id;
           transactions.unshift(e);
+        }
+        // تكلفة شراء الجهاز نفسه (بيع + شحن): تُطرح مرّة واحدة فيظهر ربح واحد
+        if (hwCost > 0) {
+          transactions.unshift({ id: uid(), deviceId: dev.id, customerName: dev.customerName, date: form.startDate, amount: hwCost, currency: hwCur, isExpense: true, type: "تكلفة جهاز", service: storeItem });
         }
       } else {
         const old = d.devices.find((x) => x.id === form.id);
@@ -1124,20 +1132,19 @@ function StarNetApp() {
     playSound("payment");
   }
 
-  // === المتجر: بيع جهاز (الآن / قيد التركيب) ===
+  // === المتجر: بيع جهاز ===
   function sellDeviceStore(item, info) {
     // info: { buyerName, dialCode, phone, email, salePrice, saleCurrency, mode:"now"|"pending" }
     snapshot("بيع جهاز من المتجر");
     setData((d) => {
       const inventory = (d.inventory || []).map((it) => (it.id === item.id ? { ...it, qty: Math.max(0, (Number(it.qty) || 0) - 1) } : it));
-      const saleId = uid();
-      const txs = [...d.transactions];
-      txs.unshift({ id: uid(), saleId, date: todayStr(), amount: Number(info.salePrice) || 0, currency: info.saleCurrency || "MRU", type: "بيع جهاز", service: item.name, customerName: info.buyerName || "", note: "جهاز من المتجر" });
-      if (Number(item.cost) > 0) {
-        txs.unshift({ id: uid(), saleId, date: todayStr(), amount: Number(item.cost) || 0, currency: item.costCurrency || "USDT", isExpense: true, type: "تكلفة جهاز", service: item.name, customerName: info.buyerName || "" });
-      }
+      let txs = [...d.transactions];
       let pendingInstalls = d.pendingInstalls || [];
+      // «بيع بدون شحن»: نسجّل بيع الجهاز وتكلفته الآن (لا اشتراك بعد). أمّا «بيع + شحن» فيُدمج لاحقاً في الجهاز كدفعة واحدة.
       if (info.mode === "pending") {
+        const saleId = uid();
+        txs.unshift({ id: uid(), saleId, date: todayStr(), amount: Number(info.salePrice) || 0, currency: info.saleCurrency || "MRU", type: "بيع جهاز", service: item.name, customerName: info.buyerName || "", note: "جهاز من المتجر" });
+        if (Number(item.cost) > 0) txs.unshift({ id: uid(), saleId, date: todayStr(), amount: Number(item.cost) || 0, currency: item.costCurrency || "USDT", isExpense: true, type: "تكلفة جهاز", service: item.name, customerName: info.buyerName || "" });
         pendingInstalls = [{ id: uid(), itemName: item.name, kit: item.kit || "", supplier: item.supplier || "", buyerName: info.buyerName || "", dialCode: info.dialCode || "+222", phone: info.phone || "", email: info.email || "", salePrice: Number(info.salePrice) || 0, saleCurrency: info.saleCurrency || "MRU", date: todayStr() }, ...pendingInstalls];
       }
       // حفظ المشتري في دفتر العملاء تلقائياً
@@ -1153,8 +1160,9 @@ function StarNetApp() {
     });
     setSellingItem(null);
     if (info.mode === "now") {
-      setEditing({ customerName: info.buyerName || "", dialCode: info.dialCode || "+222", phone: info.phone || "", email: info.email || "", currency: info.saleCurrency || "MRU", kit: item.kit || "", supplier: item.supplier || "" });
-      flash("سُجّل بيع الجهاز ✅ أكمل بيانات الشحن");
+      // المبلغ المُدخل يشمل الجهاز + الشحن (دفعة واحدة)؛ تكلفة الجهاز تُطرح تلقائياً عند الحفظ
+      setEditing({ customerName: info.buyerName || "", dialCode: info.dialCode || "+222", phone: info.phone || "", email: info.email || "", currency: info.saleCurrency || "MRU", kit: item.kit || "", supplier: item.supplier || "", totalCustomer: info.salePrice || "", amountPaid: info.salePrice || "", _hwCost: item.cost || "", _hwCostCur: item.costCurrency || "USDT", _storeItem: item.name });
+      flash("بيع + شحن: المبلغ يشمل الجهاز والشحن. أكمل تكلفة الشحن والمدة ✅");
     } else {
       flash("سُجّل البيع بدون شحن — تشحنه لاحقاً 📦");
     }
@@ -4782,11 +4790,11 @@ function SellDeviceSheet({ item, onCancel, onConfirm }) {
         <input dir="ltr" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} />
       </Field>
       <div className="sn-grid2">
-        <Field label="سعر بيع الجهاز"><input type="number" inputMode="decimal" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} /></Field>
+        <Field label="المبلغ الذي يدفعه الزبون"><input type="number" inputMode="decimal" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} /></Field>
         <Field label="العملة"><select value={saleCurrency} onChange={(e) => setSaleCurrency(e.target.value)}>{CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}</select></Field>
       </div>
-      {item.cost ? <p className="sn-hint">تكلفة شراء الجهاز: {money(item.cost)} {symbolOf(item.costCurrency)}.</p> : null}
-      <p className="sn-hint">كل جهاز مُباع يبقى مربوطاً بالشحن (الربح من الشحن الشهري). <strong>بيع + شحن الآن</strong>: تبدأ بيانات الاشتراك فوراً. <strong>بيع بدون شحن</strong>: لمن لا يريد شحناً الآن — يُسجَّل البيع ويبقى الجهاز جاهزاً لتشحنه لاحقاً.</p>
+      {item.cost ? <p className="sn-hint">تكلفة شراء الجهاز: {money(item.cost)} {symbolOf(item.costCurrency)} — تُطرح تلقائياً.</p> : null}
+      <p className="sn-hint">كل جهاز مُباع يبقى مربوطاً بالشحن (الربح من الشحن الشهري). <strong>بيع + شحن الآن</strong>: المبلغ يشمل <u>الجهاز + الشحن</u> دفعةً واحدة، وتُطرح تكلفة الجهاز وتكلفة الشحن فيظهر ربح واحد. <strong>بيع بدون شحن</strong>: لمن لا يريد شحناً الآن — يُسجَّل البيع ويبقى الجهاز جاهزاً لتشحنه لاحقاً.</p>
       <div className="sn-sheet-actions">
         <button className="sn-btn sn-btn--ghost" onClick={onCancel}>إلغاء</button>
         <button className="sn-btn" style={{ background: "#1b2746", color: "#cfe0ff" }} disabled={!buyerName.trim()} onClick={() => go("pending")}>📦 بيع بدون شحن</button>
