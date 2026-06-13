@@ -2,6 +2,26 @@
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="utf-8" />
+<script>
+window.__showErr = function (msg) {
+  try {
+    var b = document.getElementById("errbox");
+    if (!b) { b = document.createElement("div"); b.id = "errbox"; (document.body || document.documentElement).appendChild(b); }
+    b.style.cssText = "position:fixed;inset:0;z-index:100000;background:#0a1024;color:#fca5a5;font:12px/1.55 monospace;padding:16px;white-space:pre-wrap;word-break:break-word;overflow:auto;direction:ltr;text-align:left";
+    b.textContent = "\u26A0\uFE0F خطأ في التطبيق:\n\n" + msg + "\n\n(صوّر هذه الشاشة وأرسلها)";
+  } catch (e) {}
+};
+window.addEventListener("error", function (ev) {
+  var m = (ev && ev.message) || "";
+  if (ev && ev.filename) m += "\n@ " + ev.filename + " : line " + ev.lineno + " : col " + ev.colno;
+  if (ev && ev.error && ev.error.stack) m += "\n\n" + ev.error.stack;
+  window.__showErr(m || "script error");
+});
+window.addEventListener("unhandledrejection", function (ev) {
+  var r = ev && ev.reason;
+  window.__showErr("promise: " + ((r && (r.stack || r.message)) || r));
+});
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
 <meta name="theme-color" content="#0a1024" />
 <title>STAR NET ⭐ سحابي</title>
