@@ -541,6 +541,7 @@ function StarNetApp() {
   const [panel, setPanel] = useState(null); // null | countries | contacts | excel | backup | trash
   const [editing, setEditing] = useState(null); // device | "new" | null
   const [sellingItem, setSellingItem] = useState(null); // صنف مخزون قيد البيع | null
+  const [storeCharging, setStoreCharging] = useState(null); // {item, info} لشاشة بيع+شحن المبسّطة | null
   const [chargingPendingId, setChargingPendingId] = useState(null); // id لعنصر قيد التركيب يُشحن الآن | null
   const [renewing, setRenewing] = useState(null); // device | null
   const [collecting, setCollecting] = useState(null); // device being collected | null
@@ -555,6 +556,7 @@ function StarNetApp() {
   const goBack = () => {
     if (editing) { setEditing(null); setChargingPendingId(null); return; }
     if (sellingItem) { setSellingItem(null); return; }
+    if (storeCharging) { setStoreCharging(null); return; }
     if (renewing) { setRenewing(null); return; }
     if (collecting) { setCollecting(null); return; }
     if (payingSupplier) { setPayingSupplier(null); return; }
@@ -1168,7 +1170,23 @@ function StarNetApp() {
     }
     playSound("payment");
   }
-  // شحن جهاز كان قيد التركيب → يفتح نموذج إضافة جهاز كاملاً مملوءاً ببيانات المشتري
+  // حفظ «بيع + شحن» من الشاشة المبسّطة: ينشئ زبوناً بدفعة واحدة وتُطرح تكلفة الجهاز والشحن
+  function finalizeStoreCharge(item, info, fd) {
+    setData((d) => ({ ...d, inventory: (d.inventory || []).map((it) => (it.id === item.id ? { ...it, qty: Math.max(0, (Number(it.qty) || 0) - 1) } : it)) }));
+    setStoreCharging(null);
+    saveDevice({
+      customerName: info.buyerName || "", dialCode: info.dialCode || "+222", phone: info.phone || "",
+      email: fd.email || info.email || "", accountNumber: fd.account || "", wifiPassword: "", emailPassword: "",
+      country: "", currency: fd.payCurrency || "MRU", payMethod: "BANKILY",
+      startDate: fd.startDate, durationDays: Number(fd.days) || 30,
+      totalCustomer: Number(fd.payment) || 0, amountPaid: Number(fd.payment) || 0, debt: 0, credit: 0,
+      cost: Number(fd.chargeCost) || 0, costCurrency: fd.chargeCostCur || "USDT", costPaid: true,
+      kit: item.kit || "", supplier: item.supplier || "", tag: "", package: "", referredBy: "",
+      notes: [], photos: [], audio: "", originType: "", originNote: "",
+      _hwCost: Number(fd.devCost) || 0, _hwCostCur: fd.devCostCur || "USDT", _storeItem: item.name,
+    }, true);
+  }
+  // شحن جهاز كان مباعاً بدون شحن → يفتح نموذج الجهاز كاملاً مملوءاً ببيانات المشتري
   function chargePending(p) {
     setChargingPendingId(p.id);
     setPanel(null);
@@ -1607,7 +1625,19 @@ function StarNetApp() {
         <SellDeviceSheet
           item={sellingItem}
           onCancel={() => setSellingItem(null)}
-          onConfirm={(info) => sellDeviceStore(sellingItem, info)}
+          onConfirm={(info) => {
+            if (info.mode === "now") { setStoreCharging({ item: sellingItem, info }); setSellingItem(null); }
+            else { sellDeviceStore(sellingItem, info); }
+          }}
+        />
+      )}
+      {storeCharging && (
+        <StoreChargeSheet
+          item={storeCharging.item}
+          info={storeCharging.info}
+          settings={settings}
+          onCancel={() => setStoreCharging(null)}
+          onConfirm={(fd) => finalizeStoreCharge(storeCharging.item, storeCharging.info, fd)}
         />
       )}
       {editingContact && (
@@ -4799,6 +4829,55 @@ function SellDeviceSheet({ item, onCancel, onConfirm }) {
         <button className="sn-btn sn-btn--ghost" onClick={onCancel}>إلغاء</button>
         <button className="sn-btn" style={{ background: "#1b2746", color: "#cfe0ff" }} disabled={!buyerName.trim()} onClick={() => go("pending")}>📦 بيع بدون شحن</button>
         <button className="sn-btn sn-btn--primary" disabled={!buyerName.trim()} onClick={() => go("now")}>⚡ بيع + شحن الآن</button>
+      </div>
+    </Sheet>
+  );
+}
+
+// شاشة مبسّطة لـ«بيع + شحن»: المبلغ يأتي تلقائياً، وتُطرح تكلفة الجهاز والشحن فيظهر الربح مباشرةً
+function StoreChargeSheet({ item, info, settings, onCancel, onConfirm }) {
+  const rates = (settings && settings.rates) || {};
+  const tb = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
+  const [payment, setPayment] = useState(info.salePrice ? String(info.salePrice) : "");
+  const [payCurrency, setPayCurrency] = useState(info.saleCurrency || "MRU");
+  const [devCost, setDevCost] = useState(item.cost ? String(item.cost) : "");
+  const [devCostCur, setDevCostCur] = useState(item.costCurrency || "USDT");
+  const [chargeCost, setChargeCost] = useState("");
+  const [chargeCostCur, setChargeCostCur] = useState("USDT");
+  const [days, setDays] = useState(String(settings.defaultDuration || 30));
+  const [startDate, setStartDate] = useState(todayStr());
+  const [account, setAccount] = useState("");
+  const [email, setEmail] = useState(info.email || "");
+  const profit = tb(payment, payCurrency) - tb(devCost, devCostCur) - tb(chargeCost, chargeCostCur);
+  const ok = () => onConfirm({ payment, payCurrency, devCost, devCostCur, chargeCost, chargeCostCur, days, startDate, account, email });
+  return (
+    <Sheet title={"⚡ بيع + شحن: " + item.name} onClose={onCancel}>
+      <p className="sn-hint">الزبون: <strong>{info.buyerName || "—"}</strong>{item.kit ? ` • KIT: ${item.kit}` : ""}. المبلغ يأتي تلقائياً ويُحسب الربح فوراً.</p>
+      <div className="sn-grid2">
+        <Field label="المبلغ الذي دفعه الزبون (جهاز + شحن)"><input type="number" inputMode="decimal" value={payment} onChange={(e) => setPayment(e.target.value)} /></Field>
+        <Field label="العملة"><select value={payCurrency} onChange={(e) => setPayCurrency(e.target.value)}>{CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}</select></Field>
+      </div>
+      <div className="sn-grid2">
+        <Field label="تكلفة شراء الجهاز"><input type="number" inputMode="decimal" value={devCost} onChange={(e) => setDevCost(e.target.value)} /></Field>
+        <Field label="عملتها"><select value={devCostCur} onChange={(e) => setDevCostCur(e.target.value)}>{CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}</select></Field>
+      </div>
+      <div className="sn-grid2">
+        <Field label="تكلفة الشحن"><input type="number" inputMode="decimal" value={chargeCost} onChange={(e) => setChargeCost(e.target.value)} /></Field>
+        <Field label="عملتها"><select value={chargeCostCur} onChange={(e) => setChargeCostCur(e.target.value)}>{CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}</select></Field>
+      </div>
+      <div className="sn-grid2">
+        <Field label="مدة الاشتراك (يوم)"><input type="number" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)} /></Field>
+        <Field label="تاريخ الشحن"><input type="date" lang="en-GB" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
+      </div>
+      <Field label="رقم الحساب (اختياري)"><input dir="ltr" value={account} onChange={(e) => setAccount(e.target.value)} /></Field>
+      <Field label="البريد (اختياري)"><input dir="ltr" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+      <div style={{ background: profit >= 0 ? "rgba(52,211,153,.12)" : "rgba(244,63,94,.12)", border: "1px solid " + (profit >= 0 ? "#1f5a33" : "#4a2a2a"), borderRadius: 12, padding: 12, margin: "10px 0", textAlign: "center" }}>
+        <div style={{ color: "#8b95ac", fontSize: 12 }}>ربحك من هذه العملية (بعد طرح الجهاز والشحن)</div>
+        <div style={{ fontSize: 22, fontWeight: 900, color: profit >= 0 ? "#6ee7b7" : "#fca5a5" }}>{money(Math.round(profit))} <span style={{ fontSize: 13 }}>عملة</span></div>
+      </div>
+      <div className="sn-sheet-actions">
+        <button className="sn-btn sn-btn--ghost" onClick={onCancel}>إلغاء</button>
+        <button className="sn-btn sn-btn--primary" disabled={!(Number(payment) > 0)} onClick={ok}>✅ تسجيل الجهاز + الشحن</button>
       </div>
     </Sheet>
   );
