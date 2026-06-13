@@ -1156,7 +1156,7 @@ function StarNetApp() {
       setEditing({ customerName: info.buyerName || "", dialCode: info.dialCode || "+222", phone: info.phone || "", email: info.email || "", currency: info.saleCurrency || "MRU", kit: item.kit || "", supplier: item.supplier || "" });
       flash("سُجّل بيع الجهاز ✅ أكمل بيانات الشحن");
     } else {
-      flash("سُجّل البيع — الجهاز في «قيد التركيب» ⏳");
+      flash("سُجّل البيع بدون شحن — تشحنه لاحقاً 📦");
     }
     playSound("payment");
   }
@@ -4786,11 +4786,11 @@ function SellDeviceSheet({ item, onCancel, onConfirm }) {
         <Field label="العملة"><select value={saleCurrency} onChange={(e) => setSaleCurrency(e.target.value)}>{CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}</select></Field>
       </div>
       {item.cost ? <p className="sn-hint">تكلفة شراء الجهاز: {money(item.cost)} {symbolOf(item.costCurrency)}.</p> : null}
-      <p className="sn-hint"><strong>أشحنه الآن</strong>: تُكمل بيانات الاشتراك فوراً ويصير زبوناً. <strong>قيد التركيب</strong>: يُسجَّل البيع وتشحنه لاحقاً.</p>
+      <p className="sn-hint">كل جهاز مُباع يبقى مربوطاً بالشحن (الربح من الشحن الشهري). <strong>بيع + شحن الآن</strong>: تبدأ بيانات الاشتراك فوراً. <strong>بيع بدون شحن</strong>: لمن لا يريد شحناً الآن — يُسجَّل البيع ويبقى الجهاز جاهزاً لتشحنه لاحقاً.</p>
       <div className="sn-sheet-actions">
         <button className="sn-btn sn-btn--ghost" onClick={onCancel}>إلغاء</button>
-        <button className="sn-btn" style={{ background: "#1b2746", color: "#cfe0ff" }} disabled={!buyerName.trim()} onClick={() => go("pending")}>⏳ قيد التركيب</button>
-        <button className="sn-btn sn-btn--primary" disabled={!buyerName.trim()} onClick={() => go("now")}>⚡ أشحنه الآن</button>
+        <button className="sn-btn" style={{ background: "#1b2746", color: "#cfe0ff" }} disabled={!buyerName.trim()} onClick={() => go("pending")}>📦 بيع بدون شحن</button>
+        <button className="sn-btn sn-btn--primary" disabled={!buyerName.trim()} onClick={() => go("now")}>⚡ بيع + شحن الآن</button>
       </div>
     </Sheet>
   );
@@ -4891,8 +4891,8 @@ function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell, onSellDevice,
 
       {cat === "device" && (data.pendingInstalls || []).length > 0 && (
         <div className="sn-pending-wrap">
-          <h4 className="sn-pending-title">⏳ قيد التركيب ({(data.pendingInstalls || []).length})</h4>
-          <p className="sn-hint">أجهزة بيعتها ولم تشحنها بعد. اضغط «شحن الآن» لإكمال بيانات الاشتراك — يتحوّل لزبون تقدر تجدّده.</p>
+          <h4 className="sn-pending-title">📦 مباعة بدون شحن — تُشحن لاحقاً ({(data.pendingInstalls || []).length})</h4>
+          <p className="sn-hint">أجهزة بيعتها ولم تشحنها بعد، لكنها مربوطة بك. اضغط «شحن الآن» لبدء الاشتراك — يتحوّل لزبون تشحنه شهرياً (هنا الربح المتكرّر).</p>
           {(data.pendingInstalls || []).map((p) => (
             <div className="sn-inv-row" key={p.id}>
               <div className="sn-inv-info">
