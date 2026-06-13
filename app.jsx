@@ -1095,7 +1095,7 @@ function StarNetApp() {
     setData((d) => ({
       ...d,
       inventory: [
-        { id: uid(), name: info.name, category: info.category || "device", qty: Number(info.qty) || 0, cost: Number(info.cost) || 0, costCurrency: info.costCurrency || "USDT", price: Number(info.price) || 0, currency: info.currency || "MRU", createdAt: todayStr() },
+        { id: uid(), name: info.name, category: info.category || "device", qty: Number(info.qty) || 0, cost: Number(info.cost) || 0, costCurrency: info.costCurrency || "USDT", price: Number(info.price) || 0, currency: info.currency || "MRU", kit: info.kit || "", supplier: info.supplier || "", createdAt: todayStr() },
         ...(d.inventory || []),
       ],
     }));
@@ -1138,7 +1138,7 @@ function StarNetApp() {
       }
       let pendingInstalls = d.pendingInstalls || [];
       if (info.mode === "pending") {
-        pendingInstalls = [{ id: uid(), itemName: item.name, buyerName: info.buyerName || "", dialCode: info.dialCode || "+222", phone: info.phone || "", email: info.email || "", salePrice: Number(info.salePrice) || 0, saleCurrency: info.saleCurrency || "MRU", date: todayStr() }, ...pendingInstalls];
+        pendingInstalls = [{ id: uid(), itemName: item.name, kit: item.kit || "", supplier: item.supplier || "", buyerName: info.buyerName || "", dialCode: info.dialCode || "+222", phone: info.phone || "", email: info.email || "", salePrice: Number(info.salePrice) || 0, saleCurrency: info.saleCurrency || "MRU", date: todayStr() }, ...pendingInstalls];
       }
       // حفظ المشتري في دفتر العملاء تلقائياً
       let contacts = d.contacts || [];
@@ -1153,7 +1153,7 @@ function StarNetApp() {
     });
     setSellingItem(null);
     if (info.mode === "now") {
-      setEditing({ customerName: info.buyerName || "", dialCode: info.dialCode || "+222", phone: info.phone || "", email: info.email || "", currency: info.saleCurrency || "MRU" });
+      setEditing({ customerName: info.buyerName || "", dialCode: info.dialCode || "+222", phone: info.phone || "", email: info.email || "", currency: info.saleCurrency || "MRU", kit: item.kit || "", supplier: item.supplier || "" });
       flash("سُجّل بيع الجهاز ✅ أكمل بيانات الشحن");
     } else {
       flash("سُجّل البيع — الجهاز في «قيد التركيب» ⏳");
@@ -1164,7 +1164,7 @@ function StarNetApp() {
   function chargePending(p) {
     setChargingPendingId(p.id);
     setPanel(null);
-    setEditing({ customerName: p.buyerName || "", dialCode: p.dialCode || "+222", phone: p.phone || "", email: p.email || "", currency: p.saleCurrency || "MRU" });
+    setEditing({ customerName: p.buyerName || "", dialCode: p.dialCode || "+222", phone: p.phone || "", email: p.email || "", currency: p.saleCurrency || "MRU", kit: p.kit || "", supplier: p.supplier || "" });
   }
   function deletePending(id) {
     setData((d) => ({ ...d, pendingInstalls: (d.pendingInstalls || []).filter((p) => p.id !== id) }));
@@ -3674,9 +3674,6 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
       <Field label="رقم الحساب">
         <input dir="ltr" value={f.accountNumber} onChange={(e) => set("accountNumber", e.target.value)} />
       </Field>
-      <Field label="KIT (معرّف الجهاز)">
-        <input dir="ltr" value={f.kit || ""} onChange={(e) => set("kit", e.target.value)} placeholder="رقم/معرّف الـ KIT لتمييز كل جهاز" />
-      </Field>
       <div className="sn-grid2">
         <Field label="كلمة مرور الواي فاي">
           <input dir="ltr" value={f.wifiPassword} onChange={(e) => set("wifiPassword", e.target.value)} />
@@ -3771,9 +3768,6 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
       </Field>
 
       {/* (3) الدفع للمورّد */}
-      <Field label="المورّد (الذي تستلف منه أو تدفع له)">
-        <input value={f.supplier || ""} onChange={(e) => set("supplier", e.target.value)} placeholder="اسم المورّد" />
-      </Field>
       <div className="sn-supplier-box">
         <label className="sn-switch">
           <input type="checkbox" checked={f.costPaid} onChange={(e) => set("costPaid", e.target.checked)} />
@@ -4811,6 +4805,8 @@ function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell, onSellDevice,
   const [costCurrency, setCostCurrency] = useState("USDT");
   const [price, setPrice] = useState("");
   const [currency, setCurrency] = useState("MRU");
+  const [kit, setKit] = useState("");
+  const [supplier, setSupplier] = useState("");
   const items = (data.inventory || []).filter((it) => it.category === cat);
   const totalQty = items.reduce((s, it) => s + (Number(it.qty) || 0), 0);
   // سجل المبيعات (أجهزة واكسسوارات) مجمّع حسب رقم العملية مع الربح
@@ -4833,8 +4829,8 @@ function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell, onSellDevice,
   })();
   const add = () => {
     if (!name.trim()) return;
-    onAdd({ name: name.trim(), category: cat, qty, cost, costCurrency, price, currency });
-    setName(""); setQty("1"); setCost(""); setPrice("");
+    onAdd({ name: name.trim(), category: cat, qty, cost, costCurrency, price, currency, kit: cat === "device" ? kit.trim() : "", supplier: supplier.trim() });
+    setName(""); setQty("1"); setCost(""); setPrice(""); setKit(""); setSupplier("");
   };
   return (
     <>
@@ -4860,6 +4856,14 @@ function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell, onSellDevice,
       <Field label="عملة التكلفة">
         <select value={costCurrency} onChange={(e) => setCostCurrency(e.target.value)}>{CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}</select>
       </Field>
+      {cat === "device" && (
+        <Field label="KIT (معرّف الجهاز)">
+          <input dir="ltr" value={kit} onChange={(e) => setKit(e.target.value)} placeholder="رقم/معرّف الـ KIT — لتمييز كل جهاز" />
+        </Field>
+      )}
+      <Field label="المورّد (الذي اشتريت/استلفت منه)">
+        <input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="اسم المورّد" />
+      </Field>
       <button className="sn-btn sn-btn--primary sn-full" disabled={!name.trim()} onClick={add}>➕ إضافة للمخزون</button>
 
       <p className="sn-hint">إجمالي الكمية في {cat === "device" ? "الأجهزة" : "الاكسسوارات"}: <strong>{totalQty}</strong> قطعة. زر «بيع» يخصم قطعة ويسجّل الربح تلقائياً.</p>
@@ -4871,7 +4875,7 @@ function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell, onSellDevice,
           <div className="sn-inv-row" key={it.id}>
             <div className="sn-inv-info">
               <span className="sn-inv-name">{it.name} <span className={"sn-inv-qty" + (it.qty <= 0 ? " out" : "")}>{it.qty} قطعة</span></span>
-              <span className="sn-inv-sub">بيع {money(it.price)} {symbolOf(it.currency)}{it.cost ? ` • تكلفة ${money(it.cost)} ${symbolOf(it.costCurrency)}` : ""}</span>
+              <span className="sn-inv-sub">بيع {money(it.price)} {symbolOf(it.currency)}{it.cost ? ` • تكلفة ${money(it.cost)} ${symbolOf(it.costCurrency)}` : ""}{it.kit ? ` • KIT: ${it.kit}` : ""}{it.supplier ? ` • مورّد: ${it.supplier}` : ""}</span>
             </div>
             <div className="sn-inv-acts">
               {it.category === "device"
@@ -4893,7 +4897,7 @@ function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell, onSellDevice,
             <div className="sn-inv-row" key={p.id}>
               <div className="sn-inv-info">
                 <span className="sn-inv-name">{p.buyerName || "بدون اسم"}</span>
-                <span className="sn-inv-sub">{p.itemName} • بيع {money(p.salePrice)} {symbolOf(p.saleCurrency)}{p.phone ? ` • ${p.dialCode || ""}${p.phone}` : ""} • {p.date}</span>
+                <span className="sn-inv-sub">{p.itemName}{p.kit ? ` • KIT: ${p.kit}` : ""} • بيع {money(p.salePrice)} {symbolOf(p.saleCurrency)}{p.phone ? ` • ${p.dialCode || ""}${p.phone}` : ""} • {p.date}</span>
               </div>
               <div className="sn-inv-acts">
                 <button className="sn-mini sn-mini--green" onClick={() => onChargePending(p)}>⚡ شحن الآن</button>
