@@ -153,6 +153,7 @@ const DEFAULT_DATA = {
   personColors: {}, // لون ثابت لكل شخص (مفتاح الهوية → لون)
   personNumbers: {}, // رقم تسلسلي ثابت لكل شخص
   agentPayouts: [], // تسويات المندوبين: {id, agentId, amount, date}
+  agentLedger: [], // حساب المندوب الجاري: {id, agentId, type:"credit"|"debit", amount, note, date}
   inventory: [], // المخزون: {id, name, category(device|accessory), qty, cost, costCurrency, price, currency}
   pendingInstalls: [], // أجهزة مُباعة قيد التركيب لم تُشحن بعد: {id, itemName, buyerName, dialCode, phone, email, salePrice, saleCurrency, date}
   orders: [], // قائمة انتظار الطلبات: {id, customerName, phone, note, status, date}
@@ -571,6 +572,7 @@ function StarNetApp() {
   const [editingCountry, setEditingCountry] = useState(null); // country | "new" | null
   const [editingContact, setEditingContact] = useState(null); // contact | "new" | null
   const [viewAgent, setViewAgent] = useState(null); // agent being viewed
+  const [accountAgent, setAccountAgent] = useState(null); // agent whose account is open
   const [confirm, setConfirm] = useState(null); // {text, onYes}
 
   // رجوع خطوة للوراء: يغلق أعلى نافذة مفتوحة، وإلا يعود للرئيسية
@@ -587,6 +589,7 @@ function StarNetApp() {
     if (editingAgent) { setEditingAgent(null); return; }
     if (editingCountry) { setEditingCountry(null); return; }
     if (viewAgent) { setViewAgent(null); return; }
+    if (accountAgent) { setAccountAgent(null); return; }
     if (confirm) { setConfirm(null); return; }
     if (panel) { setPanel(null); return; }
     if (drawer) { setDrawer(false); return; }
@@ -1215,6 +1218,22 @@ function StarNetApp() {
     playSound("payment");
   }
 
+  // الحساب الجاري للمندوب: credit = إضافة رصيد له، debit = سحب/تسليم له
+  function addAgentLedger(agent, type, amount, note) {
+    const amt = Number(amount) || 0;
+    if (amt <= 0) return;
+    setData((d) => ({
+      ...d,
+      agentLedger: [{ id: uid(), agentId: agent.id, type, amount: amt, note: note || "", date: todayStr() }, ...(d.agentLedger || [])],
+    }));
+    flash(type === "credit" ? `أُضيف ${money(amt)} لرصيد المندوب ✅` : `سُجّل سحب ${money(amt)} من رصيد المندوب ✅`);
+    playSound(type === "credit" ? "save" : "payment");
+  }
+  function deleteAgentLedger(id) {
+    setData((d) => ({ ...d, agentLedger: (d.agentLedger || []).filter((l) => l.id !== id) }));
+    flash("حُذف القيد");
+  }
+
   function addInvItem(info) {
     setData((d) => ({
       ...d,
@@ -1683,6 +1702,7 @@ function StarNetApp() {
             onDeleteAgent={deleteAgent}
             onViewAgent={setViewAgent}
             onSettle={settleAgent}
+            onAccount={setAccountAgent}
           />
         )}
         {tab === "reports" && <Reports data={data} toBase={toBase} settings={settings} />}
@@ -1848,6 +1868,18 @@ function StarNetApp() {
           }}
           onCopy={handleCopy}
           onWhats={(dev, kind) => openWhatsApp(dev, kind, settings, customerBalance(dev, data, settings.rates))}
+        />
+      )}
+      {accountAgent && (
+        <AgentAccountSheet
+          agent={accountAgent}
+          data={data}
+          toBase={toBase}
+          onClose={() => setAccountAgent(null)}
+          onAddCredit={(amt, note) => addAgentLedger(accountAgent, "credit", amt, note)}
+          onWithdraw={(amt, note) => addAgentLedger(accountAgent, "debit", amt, note)}
+          onSettle={(amt) => settleAgent(accountAgent, amt)}
+          onDeleteEntry={deleteAgentLedger}
         />
       )}
       {renewing && (
@@ -4521,16 +4553,69 @@ function agentProfit(agentId, data, toBase) {
   return Math.round(profit * 100) / 100;
 }
 
-function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAgent, onSettle }) {
+// الحساب الجاري للمندوب: نصيبه من الأرباح + الأرصدة المضافة − (المدفوع + المسحوب)
+function agentBalance(agent, data, toBase) {
+  const profit = agentProfit(agent.id, data, toBase);
+  const share = Math.round(profit * (Number(agent.percent) || 0)) / 100;
+  const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const ledger = (data.agentLedger || []).filter((l) => l.agentId === agent.id);
+  const credits = ledger.filter((l) => l.type === "credit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const debits = ledger.filter((l) => l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const balance = Math.round((share + credits - payouts - debits) * 100) / 100;
+  return { profit, share, payouts, credits, debits, balance, ledger };
+}
+
+function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAgent, onSettle, onAccount }) {
   const agents = data.agents || [];
   const payouts = data.agentPayouts || [];
+  const [showRep, setShowRep] = useState(false);
   const devProfit = {};
   (data.transactions || []).forEach((tr) => { if (tr.deviceId) devProfit[tr.deviceId] = (devProfit[tr.deviceId] || 0) + txProfit(tr, toBase); });
+  // تقارير المندوبين: أرباح/خسائر أجهزة المندوبين، اليوم والشهر
+  const rep = (() => {
+    const t = todayStr(); const month = t.slice(0, 7);
+    const agentDevIds = new Set((data.devices || []).filter((d) => d.agentId).map((d) => d.id));
+    let profitAll = 0, profitMonth = 0, profitDay = 0, lossTotal = 0, lossCount = 0, sharesTotal = 0;
+    (data.transactions || []).forEach((tr) => {
+      if (!tr.deviceId || !agentDevIds.has(tr.deviceId)) return;
+      const p = txProfit(tr, toBase);
+      profitAll += p;
+      if ((tr.date || "").slice(0, 7) === month) profitMonth += p;
+      if (tr.date === t) profitDay += p;
+    });
+    (data.devices || []).forEach((d) => { if (d.agentId && (d.id in devProfit) && devProfit[d.id] < 0) { lossTotal += devProfit[d.id]; lossCount++; } });
+    agents.forEach((a) => { const pr = agentProfit(a.id, data, toBase); if (pr > 0) sharesTotal += pr * (Number(a.percent) || 0) / 100; });
+    return { profitAll, profitMonth, profitDay, lossTotal, lossCount, sharesTotal };
+  })();
   return (
     <div className="sn-page">
       <button className="sn-btn sn-btn--primary sn-full" onClick={onAddAgent}>
         + إضافة مندوب
       </button>
+
+      {agents.length > 0 && (
+        <section className="sn-block" style={{ marginTop: 12 }}>
+          <button onClick={() => setShowRep((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "transparent", border: "none", color: "#e7ecf6", fontFamily: "inherit", fontWeight: 800, fontSize: 15, padding: 0, cursor: "pointer" }}>
+            <span>📊 تقارير المندوبين (أرباحي وخسائري معهم)</span>
+            <span>{showRep ? "▾" : "◂"}</span>
+          </button>
+          {showRep && (
+            <div style={{ marginTop: 10 }}>
+              <div className="sn-mini-grid sn-mini-grid--2">
+                <MiniStat label="ربحي عبر المندوبين (الكل)" val={`${money(Math.round(rep.profitAll))} عملة`} danger={rep.profitAll < 0} />
+                <MiniStat label="نصيب المندوبين (الكل)" val={`${money(Math.round(rep.sharesTotal))} عملة`} />
+              </div>
+              <div className="sn-mini-grid sn-mini-grid--2">
+                <MiniStat label="ربحي معهم هذا الشهر" val={`${money(Math.round(rep.profitMonth))} عملة`} danger={rep.profitMonth < 0} />
+                <MiniStat label="ربحي معهم اليوم" val={`${money(Math.round(rep.profitDay))} عملة`} danger={rep.profitDay < 0} />
+              </div>
+              <div className="sn-mini-grid">
+                <MiniStat label="أجهزة المندوبين الخاسرة" val={`${rep.lossCount}${rep.lossTotal < 0 ? ` — خسارة ${money(Math.round(-rep.lossTotal))}` : ""}`} danger={rep.lossCount > 0} />
+              </div>
+            </div>
+          )}
+        </section>
+      )}
       {agents.length === 0 ? (
         <Empty
           icon="🤝"
@@ -4547,6 +4632,7 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
           const myDevs = data.devices.filter((d) => d.agentId === a.id);
           const agentLoss = myDevs.reduce((s, d) => s + Math.min(0, devProfit[d.id] || 0), 0);
           const lossCount = myDevs.filter((d) => (d.id in devProfit) && devProfit[d.id] <= 0).length;
+          const bal = agentBalance(a, data, toBase);
           return (
             <div className="sn-agent-card" key={a.id}>
               <div className="sn-agent-top">
@@ -4565,20 +4651,12 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
               <div className="sn-agent-figs">
                 <span className={profit < 0 ? "sn-neg" : "sn-pos"}>💰 ربحي معه: {money(profit)} عملة</span>
                 {lossCount > 0 && <span className="sn-neg">📉 خسائري معه: {money(Math.round(-agentLoss))} عملة ({lossCount} جهاز)</span>}
-                {remain > 0 && <span className="sn-neg">تدين له بـ {money(remain)} عملة</span>}
+                <span className={bal.balance > 0 ? "sn-neg" : "sn-pos"}>🧾 الرصيد: {bal.balance > 0 ? `له ${money(bal.balance)}` : bal.balance < 0 ? `عليه ${money(-bal.balance)}` : "مُسوّى ✓"} عملة</span>
               </div>
               <div className="sn-card-actions">
-                {onSettle && remain > 0 && (
-                  <button
-                    className="sn-mini sn-mini--green"
-                    onClick={() => {
-                      const v = window.prompt(`كم سلّمت للمندوب ${a.name}؟ (المتبقّي ${money(remain)})`, String(Math.round(remain)));
-                      if (v != null && Number(v) > 0) onSettle(a, Number(v));
-                    }}
-                  >
-                    💵 سلّمت نصيبه
-                  </button>
-                )}
+                <button className="sn-mini sn-mini--green" onClick={() => onAccount(a)}>
+                  💼 حسابه
+                </button>
                 <button className="sn-mini sn-mini--blue" onClick={() => onViewAgent(a)}>
                   📋 أجهزته
                 </button>
@@ -4594,6 +4672,58 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
         })
       )}
     </div>
+  );
+}
+
+// شاشة الحساب الجاري للمندوب: رصيد، إضافة، سحب، وكشف حساب
+function AgentAccountSheet({ agent, data, toBase, onClose, onAddCredit, onWithdraw, onSettle, onDeleteEntry }) {
+  const bal = agentBalance(agent, data, toBase);
+  const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).map((p) => ({ id: p.id, kind: "payout", amount: Number(p.amount) || 0, date: p.date, note: "تسليم نصيب" }));
+  const ledger = (bal.ledger || []).map((l) => ({ id: l.id, kind: l.type, amount: Number(l.amount) || 0, date: l.date, note: l.note || "" }));
+  const entries = [...ledger, ...payouts].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const ask = (q, cb) => { const v = window.prompt(q); if (v != null && Number(v) > 0) { const n = window.prompt("ملاحظة (اختياري)") || ""; cb(Number(v), n); } };
+  const box = { background: "#111a36", border: "1px solid #243352", borderRadius: 14, padding: 14, marginBottom: 12 };
+  const row = { display: "flex", justifyContent: "space-between", fontSize: 13.5, marginTop: 6 };
+  const posCol = "#34d399", negCol = "#fb7185";
+  return (
+    <Sheet title={`💼 حساب ${agent.name}`} onClose={onClose}>
+      <div style={{ ...box, textAlign: "center", background: bal.balance > 0 ? "rgba(251,113,133,.12)" : "rgba(52,211,153,.10)", border: "1px solid " + (bal.balance > 0 ? "#5a2a3a" : "#1f5a33") }}>
+        <div style={{ color: "#8b95ac", fontSize: 12 }}>الرصيد الحالي</div>
+        <div style={{ fontSize: 26, fontWeight: 900, color: bal.balance > 0 ? negCol : posCol }}>
+          {bal.balance > 0 ? `له ${money(bal.balance)}` : bal.balance < 0 ? `عليه ${money(-bal.balance)}` : "مُسوّى ✓"} <span style={{ fontSize: 13 }}>عملة</span>
+        </div>
+        <div style={{ color: "#8b95ac", fontSize: 11.5, marginTop: 4 }}>{bal.balance > 0 ? "أنت تدين له بهذا المبلغ" : bal.balance < 0 ? "هو يدين لك بهذا المبلغ" : "الحساب متوازن"}</div>
+      </div>
+
+      <div style={box}>
+        <div style={{ ...row, marginTop: 0 }}><span>💰 نصيبه من أرباح الأجهزة</span><strong>{money(bal.share)} عملة</strong></div>
+        <div style={row}><span>➕ رصيد مضاف له</span><strong style={{ color: posCol }}>{money(bal.credits)} عملة</strong></div>
+        <div style={row}><span>➖ المدفوع/المسحوب</span><strong style={{ color: negCol }}>{money(bal.payouts + bal.debits)} عملة</strong></div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <button onClick={() => ask(`كم تضيف لرصيد ${agent.name}؟`, (v, n) => onAddCredit(v, n))} style={{ flex: 1, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➕ إضافة رصيد له</button>
+        <button onClick={() => ask(`كم يسحب/يُسلّم لـ ${agent.name}؟`, (v, n) => onWithdraw(v, n))} style={{ flex: 1, background: "#3a1620", color: "#fca5a5", border: "1px solid #5a2a3a", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➖ سحب / تسليم</button>
+      </div>
+
+      <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>📒 كشف الحساب</h3>
+      {entries.length === 0 && <p className="sn-hint" style={{ textAlign: "center" }}>لا حركات بعد.</p>}
+      {entries.map((e) => {
+        const isCredit = e.kind === "credit";
+        return (
+          <div key={e.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#111a36", border: "1px solid #243352", borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 13.5, color: isCredit ? posCol : negCol }}>{isCredit ? "➕ إضافة رصيد" : e.kind === "payout" ? "💵 تسليم نصيب" : "➖ سحب"}</div>
+              <div style={{ color: "#8b95ac", fontSize: 12 }}>{fmtDate(e.date)}{e.note ? ` • ${e.note}` : ""}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <strong style={{ color: isCredit ? posCol : negCol, fontSize: 14 }}>{isCredit ? "+" : "−"}{money(e.amount)}</strong>
+              {e.kind !== "payout" && <button onClick={() => onDeleteEntry(e.id)} style={{ background: "transparent", border: "none", color: "#fb7185", fontSize: 16, cursor: "pointer" }}>🗑️</button>}
+            </div>
+          </div>
+        );
+      })}
+    </Sheet>
   );
 }
 
