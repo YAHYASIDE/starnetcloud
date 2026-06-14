@@ -3218,19 +3218,28 @@ function ProfitStatement({ data, toBase }) {
 function Reports({ data, toBase, settings }) {
   const t = todayStr();
   const month = t.slice(0, 7);
+  const [showLoss, setShowLoss] = useState(false);
 
   const agg = useMemo(() => {
     let dayP = 0, monthP = 0, allP = 0, monthRevenue = 0, debt = 0, supplierUnpaid = 0;
-    let storeP = 0, chargeP = 0;
+    let storeP = 0, chargeP = 0, agentChargeP = 0, organicChargeP = 0;
     let usdChargeAll = 0, usdChargeMonth = 0, usdOwed = 0;
     const byCur = {};
     const byCurExp = {};
+    const devAgent = {};
+    (data.devices || []).forEach((d) => { devAgent[d.id] = d.agentId || ""; });
+    const devProfit = {};
     data.transactions.forEach((tr) => {
       const profit = txProfit(tr, toBase);
       allP += profit;
-      // فصل نظيف: عمليات مرتبطة بجهاز زبون (شحن/بيع+شحن) = أرباح الأجهزة والشحن، وبيع المتجر الصافي (بدون شحن) = أرباح المتجر
+      if (tr.deviceId) devProfit[tr.deviceId] = (devProfit[tr.deviceId] || 0) + profit;
+      // فصل نظيف: بيع المتجر الصافي (بدون شحن) = أرباح المتجر، والمرتبط بجهاز = أرباح أجهزة (مفصولة: بدون مندوب / عبر مندوب)
       if (tr.saleId && !tr.deviceId) storeP += profit;
-      else if (tr.deviceId) chargeP += profit;
+      else if (tr.deviceId) {
+        chargeP += profit;
+        if (devAgent[tr.deviceId]) agentChargeP += profit;
+        else organicChargeP += profit;
+      }
       // دولار الشحن: ما دُفع للمورّد فعلاً (بالدولار)
       if (tr.type === "دفع للمورّد") {
         usdChargeAll += Number(tr.amount) || 0;
@@ -3258,7 +3267,12 @@ function Reports({ data, toBase, settings }) {
       if (ap > 0) agentsShare += ap * (Number(a.percent) || 0) / 100;
     });
     const myNet = allP - agentsShare;
-    return { dayP, monthP, allP, monthRevenue, debt, supplierUnpaid, byCur, byCurExp, agentsShare, myNet, storeP, chargeP, usdChargeAll, usdChargeMonth, usdOwed };
+    const lossDevices = (data.devices || [])
+      .filter((d) => (d.id in devProfit) && devProfit[d.id] <= 0)
+      .map((d) => ({ d, p: devProfit[d.id] }))
+      .sort((a, b) => a.p - b.p);
+    const lossTotal = lossDevices.reduce((s, x) => s + Math.min(0, x.p), 0);
+    return { dayP, monthP, allP, monthRevenue, debt, supplierUnpaid, byCur, byCurExp, agentsShare, myNet, storeP, chargeP, agentChargeP, organicChargeP, usdChargeAll, usdChargeMonth, usdOwed, devProfit, lossDevices, lossTotal };
   }, [data, toBase, t]);
 
   // أفضل الزبائن + إحصاء الدول + مقارنة الشهر بالماضي
@@ -3450,8 +3464,36 @@ function Reports({ data, toBase, settings }) {
 
       <div className="sn-mini-grid sn-mini-grid--2">
         <MiniStat label="🛒 أرباح المتجر (بيع بدون شحن + اكسسوارات)" val={`${money(agg.storeP)} عملة`} danger={agg.storeP < 0} />
-        <MiniStat label="📡 أرباح الأجهزة والشحن (اشتراكات + بيع مع شحن)" val={`${money(agg.chargeP)} عملة`} danger={agg.chargeP < 0} />
+        <MiniStat label="📡 أرباح أجهزتي (بدون مندوب)" val={`${money(agg.organicChargeP)} عملة`} danger={agg.organicChargeP < 0} />
       </div>
+      <div className="sn-mini-grid sn-mini-grid--2">
+        <MiniStat label="🤝 أرباح عبر المندوبين" val={`${money(agg.agentChargeP)} عملة`} danger={agg.agentChargeP < 0} />
+        <MiniStat label="📉 أجهزة لم نربح معها" val={`${agg.lossDevices.length}`} danger={agg.lossDevices.length > 0} />
+      </div>
+
+      <section className="sn-block">
+        <button onClick={() => setShowLoss((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "transparent", border: "none", color: "#e7ecf6", fontFamily: "inherit", fontWeight: 800, fontSize: 15, padding: 0, cursor: "pointer" }}>
+          <span>📉 الأجهزة التي لم نربح معها ({agg.lossDevices.length}){agg.lossTotal < 0 ? ` — خسارة ${money(Math.round(-agg.lossTotal))} عملة` : ""}</span>
+          <span>{showLoss ? "▾" : "◂"}</span>
+        </button>
+        {showLoss && (
+          <div style={{ marginTop: 10 }}>
+            {agg.lossDevices.length === 0 ? (
+              <p className="sn-hint" style={{ textAlign: "center" }}>كل أجهزتك المشحونة رابحة 👍</p>
+            ) : (
+              agg.lossDevices.map(({ d, p }) => (
+                <div key={d.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, background: "#111a36", border: "1px solid #243352", borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 800, fontSize: 13.5 }}>{d.customerName || "بدون اسم"}{d.accountNumber ? ` (${d.accountNumber})` : ""}</div>
+                    <div style={{ color: "#8b95ac", fontSize: 12 }}>{d.agentId ? "عبر مندوب" : "بدون مندوب"}{d.country ? ` • ${d.country}` : ""}</div>
+                  </div>
+                  <div style={{ fontWeight: 900, fontSize: 13.5, color: p < 0 ? "#fb7185" : "#fbbf24", whiteSpace: "nowrap" }}>{money(Math.round(p))} عملة</div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </section>
 
       <section className="sn-block">
         <h2>💵 كشف الدولار في الشحن</h2>
@@ -4467,6 +4509,8 @@ function agentProfit(agentId, data, toBase) {
 function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAgent, onSettle }) {
   const agents = data.agents || [];
   const payouts = data.agentPayouts || [];
+  const devProfit = {};
+  (data.transactions || []).forEach((tr) => { if (tr.deviceId) devProfit[tr.deviceId] = (devProfit[tr.deviceId] || 0) + txProfit(tr, toBase); });
   return (
     <div className="sn-page">
       <button className="sn-btn sn-btn--primary sn-full" onClick={onAddAgent}>
@@ -4485,6 +4529,9 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
           const paid = payouts.filter((p) => p.agentId === a.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
           const remain = Math.round((share - paid) * 100) / 100;
           const count = data.devices.filter((d) => d.agentId === a.id).length;
+          const myDevs = data.devices.filter((d) => d.agentId === a.id);
+          const agentLoss = myDevs.reduce((s, d) => s + Math.min(0, devProfit[d.id] || 0), 0);
+          const lossCount = myDevs.filter((d) => (d.id in devProfit) && devProfit[d.id] <= 0).length;
           return (
             <div className="sn-agent-card" key={a.id}>
               <div className="sn-agent-top">
@@ -4501,8 +4548,9 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
                 </div>
               </div>
               <div className="sn-agent-figs">
-                <span className={profit < 0 ? "sn-neg" : ""}>ربح أجهزته: {money(profit)} عملة</span>
+                <span className={profit < 0 ? "sn-neg" : ""}>ربحي معه: {money(profit)} عملة</span>
                 <span>سُلّم له: {money(paid)} عملة</span>
+                {lossCount > 0 && <span className="sn-neg">خسائر معه: {money(Math.round(-agentLoss))} عملة ({lossCount} جهاز)</span>}
                 <span className={remain > 0 ? "sn-neg" : "sn-pos"}>{remain > 0 ? `تدين له بـ ${money(remain)}` : remain < 0 ? `زائد ${money(-remain)}` : "مُسوّى ✓"} عملة</span>
               </div>
               <div className="sn-card-actions">
