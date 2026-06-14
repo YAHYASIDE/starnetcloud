@@ -129,6 +129,7 @@ const DEFAULT_DATA = {
   settings: {
     businessName: "STAR NET",
     defaultDuration: 28,
+    monthlyBilling: true, // التجديد بنفس يوم الشهر التالي (لا أيام ثابتة)
     supplierDays: 23, // بعد كم يوم من البداية يستحق الدفع للمورّد
     rates: { USDT: 430, FCFA: 3.6, MRU: 1 }, // 1 وحدة من العملة → كم "عملة أساس"
     soonDays: 3,
@@ -180,6 +181,23 @@ function addDays(dateStr, n) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
     d.getDate()
   ).padStart(2, "0")}`;
+}
+// إضافة أشهر مع تثبيت نفس اليوم (وتقليصه إن كان الشهر التالي أقصر: 31 يناير + شهر = 28/29 فبراير)
+function addMonths(dateStr, n) {
+  const d = parseDate(dateStr);
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + Number(n || 0));
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDay));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+// عدد الأشهر التقريبي من عدد الأيام (28/30 ≈ شهر، 60 ≈ شهران…)
+function monthsFromDays(days) { return Math.max(1, Math.round((Number(days) || 30) / 30)); }
+// تاريخ الانتهاء: شهري بنفس اليوم (افتراضي) أو أيام ثابتة حسب الإعداد
+function computeEnd(startStr, durationDays, settings) {
+  const monthly = !settings || settings.monthlyBilling !== false; // افتراضي مُفعّل
+  return monthly ? addMonths(startStr, monthsFromDays(durationDays)) : addDays(startStr, durationDays);
 }
 function fmtDate(s) {
   if (!s) return "—";
@@ -666,7 +684,7 @@ function StarNetApp() {
   function saveDevice(form, isNew) {
     snapshot(isNew ? "إضافة جهاز" : "تعديل جهاز");
     setData((d) => {
-      const endDate = addDays(form.startDate, form.durationDays);
+      const endDate = computeEnd(form.startDate, form.durationDays, settings);
       const dev = { ...form, endDate };
       const hwCost = Number(form._hwCost) || 0;       // تكلفة شراء الجهاز (من المتجر) — تُطرح مرّة واحدة
       const hwCur = form._hwCostCur || "USDT";
@@ -776,7 +794,7 @@ function StarNetApp() {
   function renewDevice(device, info) {
     snapshot("تجديد");
     setData((d) => {
-      const newEnd = addDays(info.date, info.durationDays);
+      const newEnd = computeEnd(info.date, info.durationDays, settings);
       const devices = d.devices.map((x) =>
         x.id === device.id
           ? {
@@ -1325,7 +1343,7 @@ function StarNetApp() {
         const name = String(r.customerName).trim();
         const startDate = excelToDateStr(r.startDate) || todayStr();
         const durationDays = Number(r.durationDays) > 0 ? Number(r.durationDays) : d.settings.defaultDuration;
-        const endDate = addDays(startDate, durationDays);
+        const endDate = computeEnd(startDate, durationDays, settings);
         const total = Number(r.totalCustomer) || 0;
         const paid = Number(r.amountPaid) || 0;
         const diff = total - paid;
@@ -3743,7 +3761,7 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
     return res;
   }, [f.customerName, f.email, f.accountNumber, f.id, devices]);
 
-  const endPreview = addDays(f.startDate, f.durationDays);
+  const endPreview = computeEnd(f.startDate, f.durationDays, settings);
 
   const submit = () => {
     if (!f.customerName.trim()) return;
@@ -4211,7 +4229,7 @@ function RenewForm({ device, settings, countries = [], onSaveRate, onCancel, onC
     setDebtManual(true);
     setInfo((p) => ({ ...p, credit: v, debt: 0 }));
   };
-  const endPreview = addDays(info.date, info.durationDays);
+  const endPreview = computeEnd(info.date, info.durationDays, settings);
 
   const [rateAmt, setRateAmt] = useState("");
   const [rateUsd, setRateUsd] = useState("");
@@ -5641,6 +5659,15 @@ function Settings({ settings, onSave, onReset }) {
         <Field label="🎯 هدف ربح الشهر (بالأوقية — 0 = بلا هدف)">
           <input type="number" value={s.monthlyGoal || 0} onChange={(e) => set("monthlyGoal", Number(e.target.value) || 0)} />
         </Field>
+        <label className="sn-switch-row">
+          <span>📅 التجديد بنفس يوم الشهر التالي (دورة شهرية)</span>
+          <input
+            type="checkbox"
+            checked={s.monthlyBilling !== false}
+            onChange={(e) => set("monthlyBilling", e.target.checked)}
+          />
+        </label>
+        <p className="sn-hint" style={{ marginTop: -4 }}>عند التفعيل: لو شحنت يوم 4 فالتجديد يوم 4 من الشهر القادم (لا بعد 28 يوماً). عند الإيقاف: يُحسب بعدد الأيام المحدّدة.</p>
         <label className="sn-switch-row">
           <span>🔊 أصوات التطبيق (دفع / شحن / حفظ)</span>
           <input
