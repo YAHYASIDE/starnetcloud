@@ -1604,12 +1604,8 @@ function StarNetApp() {
         )}
       </main>
 
-      {/* زر رجوع دائم */}
-      <button
-        onClick={goBack}
-        aria-label="رجوع خطوة"
-        style={{ position: "fixed", insetInlineStart: 14, bottom: 84, padding: "9px 15px", borderRadius: 22, border: "1px solid #2a3a5e", background: "rgba(17,26,54,.95)", color: "#a9c2ff", fontFamily: "inherit", fontSize: 13.5, fontWeight: 800, boxShadow: "0 6px 18px rgba(0,0,0,.45)", zIndex: 70, cursor: "pointer" }}
-      >‹ رجوع</button>
+      {/* زر رجوع دائري قابل للسحب */}
+      <DraggableBack onBack={goBack} />
 
       {/* شريط التنقل السفلي */}
       <nav className="sn-tabs">
@@ -5845,6 +5841,50 @@ function Field({ label, children }) {
   );
 }
 
+// زر رجوع دائري صغير قابل للسحب (نقرة = رجوع، سحب = تحريك)
+function DraggableBack({ onBack }) {
+  const [pos, setPos] = useState(null);
+  const r = useRef({ down: false, moved: false, sx: 0, sy: 0, ox: 0, oy: 0 });
+  const def = () => ({ x: 14, y: (typeof window !== "undefined" ? window.innerHeight - 150 : 500) });
+  useEffect(() => {
+    const move = (e) => {
+      if (!r.current.down) return;
+      const p = e.touches ? e.touches[0] : e;
+      const dx = p.clientX - r.current.sx, dy = p.clientY - r.current.sy;
+      if (Math.abs(dx) + Math.abs(dy) > 6) r.current.moved = true;
+      const W = window.innerWidth, H = window.innerHeight;
+      setPos({ x: Math.max(4, Math.min(W - 52, r.current.ox + dx)), y: Math.max(46, Math.min(H - 52, r.current.oy + dy)) });
+    };
+    const up = () => {
+      if (r.current.down && !r.current.moved) onBack();
+      r.current.down = false;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [onBack, pos]);
+  const down = (e) => {
+    const p = e.touches ? e.touches[0] : e;
+    const cur = pos || def();
+    r.current = { down: true, moved: false, sx: p.clientX, sy: p.clientY, ox: cur.x, oy: cur.y };
+    if (!pos) setPos(cur);
+  };
+  const cur = pos || def();
+  return (
+    <button
+      onPointerDown={down}
+      aria-label="رجوع"
+      title="رجوع (اسحبني لتحريكي)"
+      style={{ position: "fixed", left: cur.x, top: cur.y, width: 46, height: 46, borderRadius: "50%", border: "1px solid #2a3a5e", background: "rgba(17,26,54,.96)", color: "#a9c2ff", fontSize: 20, boxShadow: "0 6px 18px rgba(0,0,0,.5)", zIndex: 70, cursor: "grab", touchAction: "none", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, lineHeight: 1, userSelect: "none" }}
+    >🔙</button>
+  );
+}
+
 function Sheet({ title, onClose, children }) {
   return (
     <div className="sn-overlay" onClick={onClose}>
@@ -5924,11 +5964,11 @@ const CSS = `
 .sn-drawer-head .sn-logo-img{width:50px;height:50px}
 .sn-brand h1{font-size:21px;font-weight:800;letter-spacing:.5px}
 .sn-brand p{font-size:12.5px;color:var(--muted);margin-top:2px}
-.sn-menu-btn{position:absolute;top:18px;left:16px;z-index:2;width:42px;height:42px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.08);color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.sn-menu-btn{position:absolute;top:18px;right:16px;left:auto;z-index:2;width:42px;height:42px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.08);color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
 .sn-hbtn{position:absolute;top:18px;z-index:2;width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.10);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);font-size:21px;line-height:1;padding:0}
 .sn-hbtn:active{transform:scale(.93)}
-.sn-menu-btn.sn-hbtn{left:16px;border-radius:50%;width:44px;height:44px;background:linear-gradient(135deg,#22d3ee,#3b82f6);border-color:transparent;box-shadow:0 4px 14px rgba(56,189,248,.4);font-size:19px}
-.sn-add-btn{right:16px;font-size:30px;font-weight:300;background:linear-gradient(135deg,#6f8bff,#8b5cf6);border-color:transparent;box-shadow:0 4px 14px rgba(120,120,255,.4)}
+.sn-menu-btn.sn-hbtn{right:16px;left:auto;border-radius:50%;width:44px;height:44px;background:linear-gradient(135deg,#22d3ee,#3b82f6);border-color:transparent;box-shadow:0 4px 14px rgba(56,189,248,.4);font-size:19px}
+.sn-add-btn{left:16px;right:auto;font-size:30px;font-weight:300;background:linear-gradient(135deg,#6f8bff,#8b5cf6);border-color:transparent;box-shadow:0 4px 14px rgba(120,120,255,.4)}
 .sn-brand{justify-content:center;text-align:center;padding:0 54px}
 .sn-drawer-wrap{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.55);display:flex;justify-content:flex-start;animation:snFade .15s ease}
 .sn-drawer{width:80%;max-width:320px;height:100%;background:var(--surface);border-inline-end:1px solid var(--border);display:flex;flex-direction:column;box-shadow:0 0 40px rgba(0,0,0,.5);animation:snSlideIn .22s ease;overflow-y:auto}
