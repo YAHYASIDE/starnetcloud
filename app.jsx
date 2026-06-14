@@ -358,8 +358,8 @@ function deviceLedger(deviceId, transactions, toBase) {
 // نسخ نص إلى الحافظة (مع بديل احتياطي للبيئات المقيّدة)
 function copyToClipboard(text) {
   try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text);
+    if (navigator.clipboard && navigator.clipboard.writeText && document.hasFocus()) {
+      navigator.clipboard.writeText(text).catch(function () {});
       return true;
     }
   } catch (e) {
@@ -560,6 +560,7 @@ function StarNetApp() {
   const [editing, setEditing] = useState(null); // device | "new" | null
   const [sellingItem, setSellingItem] = useState(null); // صنف مخزون قيد البيع | null
   const [storeCharging, setStoreCharging] = useState(null); // {item, info} لشاشة بيع+شحن المبسّطة | null
+  const [showReminders, setShowReminders] = useState(false); // لوحة تذكير الزبائن الجماعي
   const [chargingPendingId, setChargingPendingId] = useState(null); // id لعنصر قيد التركيب يُشحن الآن | null
   const [renewing, setRenewing] = useState(null); // device | null
   const [collecting, setCollecting] = useState(null); // device being collected | null
@@ -575,6 +576,7 @@ function StarNetApp() {
     if (editing) { setEditing(null); setChargingPendingId(null); return; }
     if (sellingItem) { setSellingItem(null); return; }
     if (storeCharging) { setStoreCharging(null); return; }
+    if (showReminders) { setShowReminders(false); return; }
     if (renewing) { setRenewing(null); return; }
     if (collecting) { setCollecting(null); return; }
     if (payingSupplier) { setPayingSupplier(null); return; }
@@ -1433,7 +1435,7 @@ function StarNetApp() {
     ? null
     : (data.agents || []).find((a) => (a.loginEmail || "").trim().toLowerCase() === __email);
   if (__myAgent) {
-    return <AgentView agent={__myAgent} data={data} settings={data.settings} />;
+    return <AgentView agent={__myAgent} data={data} settings={data.settings} onExport={handleExport} onExportImage={handleExportImage} />;
   }
   if (__email && !__ADMINS.includes(__email)) {
     return (
@@ -1480,6 +1482,10 @@ function StarNetApp() {
               <button className="sn-drawer-item" onClick={() => { setEditing("new"); setDrawer(false); }}>
                 <span className="sn-drawer-ic">➕</span>
                 <span className="sn-drawer-lbl">إضافة جهاز جديد</span>
+              </button>
+              <button className="sn-drawer-item" onClick={() => { setShowReminders(true); setDrawer(false); }}>
+                <span className="sn-drawer-ic">📲</span>
+                <span className="sn-drawer-lbl">تذكير الزبائن (واتساب)</span>
               </button>
               <button className="sn-drawer-item" onClick={() => { setPanel("contacts"); setDrawer(false); }}>
                 <span className="sn-drawer-ic">📒</span>
@@ -1659,6 +1665,9 @@ function StarNetApp() {
           onCancel={() => setStoreCharging(null)}
           onConfirm={(fd) => finalizeStoreCharge(storeCharging.item, storeCharging.info, fd)}
         />
+      )}
+      {showReminders && (
+        <RemindersSheet data={data} settings={settings} onClose={() => setShowReminders(false)} />
       )}
       {editingContact && (
         <ContactForm
@@ -4573,20 +4582,40 @@ function CountryForm({ initial, onCancel, onSave }) {
   );
 }
 
-function AgentView({ agent, data, settings }) {
+function AgentView({ agent, data, settings, onExport, onExportImage }) {
+  const [openPaid, setOpenPaid] = useState(false);
+  const [openProfit, setOpenProfit] = useState(false);
+  const [openLoss, setOpenLoss] = useState(false);
+  const [showCal, setShowCal] = useState(false);
   const myDevices = (data.devices || []).filter((d) => d.agentId === agent.id);
+  const myIds = new Set(myDevices.map((d) => d.id));
   const rates = (settings && settings.rates) || {};
   const toBase = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
   const activeCount = myDevices.filter((d) => !d.broken && diffDays(todayStr(), d.endDate) >= 0).length;
   const brokenCount = myDevices.filter((d) => d.broken).length;
   let totalDebt = 0;
   myDevices.forEach((d) => { if (Number(d.debt) > 0) totalDebt += toBase(Number(d.debt), d.debtCurrency || d.currency || "MRU"); });
-  const paidToMe = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id);
+  const paidToMe = payouts.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const month = todayStr().slice(0, 7);
+  const devProfit = {}; let profitMonth = 0;
+  (data.transactions || []).forEach((tr) => {
+    if (!tr.deviceId || !myIds.has(tr.deviceId)) return;
+    const p = txProfit(tr, toBase);
+    devProfit[tr.deviceId] = (devProfit[tr.deviceId] || 0) + p;
+    if ((tr.date || "").slice(0, 7) === month) profitMonth += p;
+  });
+  const pct = Number(agent.percent) || 0;
+  const shareMonth = profitMonth * pct / 100;
+  const lossDevices = myDevices.filter((d) => (devProfit[d.id] || 0) < 0);
+  const totalLoss = lossDevices.reduce((s, d) => s + (devProfit[d.id] || 0), 0);
 
   const stColor = (k) => k === "active" ? "#34d399" : (k === "soon" || k === "urgent") ? "#fbbf24" : "#fb7185";
   const box = { background: "#111a36", border: "1px solid #243352", borderRadius: 16, padding: 14, marginBottom: 12 };
   const lbl = { color: "#8b95ac", fontSize: 12 };
   const val = { fontWeight: 800, fontSize: 14, color: "#e7ecf6" };
+  const fHead = { width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "transparent", border: "none", color: "#e7ecf6", fontFamily: "inherit", fontWeight: 800, fontSize: 13.5, padding: 0, cursor: "pointer" };
+  const miniBtn = { background: "#1b2746", color: "#a9c2ff", border: "1px solid #2a3a5e", borderRadius: 10, padding: "9px 12px", fontFamily: "inherit", fontWeight: 800, fontSize: 13 };
 
   return (
     <div className="sn-root" dir="rtl" style={{ minHeight: "100vh", background: "#0a1024", color: "#e7ecf6", fontFamily: "Tajawal,Tahoma,sans-serif", padding: 14 }}>
@@ -4600,15 +4629,44 @@ function AgentView({ agent, data, settings }) {
         <button onClick={() => window.__logout && window.__logout()} style={{ background: "#1e2a4a", color: "#fca5a5", border: "none", borderRadius: 10, padding: "8px 12px", fontFamily: "inherit", fontWeight: 800 }}>🚪 خروج</button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+      <div style={{ ...box, textAlign: "center", background: totalDebt > 0 ? "rgba(251,113,133,.12)" : "rgba(52,211,153,.10)", border: "1px solid " + (totalDebt > 0 ? "#5a2a3a" : "#1f5a33") }}>
+        <div style={lbl}>إجمالي ديون زبائنك (المتبقّي عليهم)</div>
+        <div style={{ fontSize: 30, fontWeight: 900, color: totalDebt > 0 ? "#fb7185" : "#34d399" }}>{money(Math.round(totalDebt))} <span style={{ fontSize: 14 }}>عملة</span></div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
         <div style={{ ...box, marginBottom: 0, textAlign: "center" }}><div style={lbl}>أجهزتي</div><div style={{ ...val, fontSize: 20 }}>{myDevices.length}</div></div>
         <div style={{ ...box, marginBottom: 0, textAlign: "center" }}><div style={lbl}>نشطة</div><div style={{ ...val, fontSize: 20, color: "#34d399" }}>{activeCount}</div></div>
         <div style={{ ...box, marginBottom: 0, textAlign: "center" }}><div style={lbl}>معطّلة</div><div style={{ ...val, fontSize: 20, color: "#fb7185" }}>{brokenCount}</div></div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-        <div style={{ ...box, marginBottom: 0 }}><div style={lbl}>إجمالي ديون زبائني</div><div style={{ ...val, color: totalDebt > 0 ? "#fb7185" : "#34d399" }}>{money(Math.round(totalDebt))} عملة</div></div>
-        <div style={{ ...box, marginBottom: 0 }}><div style={lbl}>المبلغ المُسلّم لك</div><div style={val}>{money(Math.round(paidToMe))} عملة</div></div>
+      <button onClick={() => setShowCal((v) => !v)} style={{ ...miniBtn, width: "100%", marginBottom: 12, padding: "11px" }}>🗓️ {showCal ? "إخفاء التقويم" : "تقويم أجهزتي"}</button>
+      {showCal && <div style={box}><CalendarPanel data={{ ...data, devices: myDevices }} /></div>}
+
+      <div style={box}>
+        <button onClick={() => setOpenPaid((v) => !v)} style={fHead}><span>💰 المبلغ المُسلّم لك: {money(Math.round(paidToMe))} عملة</span><span>{openPaid ? "▾" : "◂"}</span></button>
+        {openPaid && (payouts.length ? payouts.slice().reverse().map((p, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13, color: "#cdd6f4" }}><span>{p.date || "—"}</span><span style={{ fontWeight: 800 }}>{money(p.amount)} عملة</span></div>
+        )) : <div style={{ ...lbl, marginTop: 8 }}>لا مدفوعات مسجّلة بعد.</div>)}
+      </div>
+
+      <div style={box}>
+        <button onClick={() => setOpenProfit((v) => !v)} style={fHead}><span>📊 ربحك هذا الشهر: {money(Math.round(shareMonth))} عملة</span><span>{openProfit ? "▾" : "◂"}</span></button>
+        {openProfit && (
+          <div style={{ marginTop: 8, fontSize: 13, color: "#cdd6f4" }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}><span>ربح أجهزتك هذا الشهر</span><span style={{ fontWeight: 800 }}>{money(Math.round(profitMonth))} عملة</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}><span>نسبتك</span><span style={{ fontWeight: 800 }}>{pct}%</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, color: "#6ee7b7" }}><span>نصيبك</span><span style={{ fontWeight: 900 }}>{money(Math.round(shareMonth))} عملة</span></div>
+            <p style={{ ...lbl, marginTop: 8 }}>يُحسب من أول الشهر ويبدأ من جديد مع بداية كل شهر.</p>
+          </div>
+        )}
+      </div>
+
+      <div style={box}>
+        <button onClick={() => setOpenLoss((v) => !v)} style={fHead}><span>📉 أجهزة خاسرة: {lossDevices.length}{totalLoss < 0 ? ` (خسارة ${money(Math.round(-totalLoss))})` : ""}</span><span>{openLoss ? "▾" : "◂"}</span></button>
+        {openLoss && (lossDevices.length ? lossDevices.map((d) => (
+          <div key={d.id} style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13 }}><span>{d.customerName || "بدون اسم"}{d.accountNumber ? ` (${d.accountNumber})` : ""}</span><span style={{ fontWeight: 800, color: "#fb7185" }}>{money(Math.round(devProfit[d.id] || 0))} عملة</span></div>
+        )) : <div style={{ ...lbl, marginTop: 8 }}>لا أجهزة خاسرة 👍</div>)}
       </div>
 
       {myDevices.length === 0 && (
@@ -4642,9 +4700,12 @@ function AgentView({ agent, data, settings }) {
             {notes.length > 0 && (
               <div style={{ marginTop: 8 }}><div style={lbl}>ملاحظات</div><div style={{ color: "#cdd6f4", fontSize: 13 }}>{notes.join(" • ")}</div></div>
             )}
-            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              <button onClick={() => openWhatsApp(d, "reminder", settings, customerBalance(d, data, settings.rates))} style={{ flex: 1, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 10, padding: "9px", fontFamily: "inherit", fontWeight: 800, fontSize: 13 }}>📲 تذكير واتساب</button>
-              {telNum && <button onClick={() => window.open("tel:" + telNum)} style={{ background: "#1b2746", color: "#a9c2ff", border: "1px solid #2a3a5e", borderRadius: 10, padding: "9px 14px", fontFamily: "inherit", fontWeight: 800, fontSize: 13 }}>📞</button>}
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <button onClick={() => openWhatsApp(d, "reminder", settings, customerBalance(d, data, settings.rates))} style={{ flex: "1 1 46%", background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 10, padding: "9px", fontFamily: "inherit", fontWeight: 800, fontSize: 13 }}>📲 تذكير</button>
+              <button onClick={() => openWhatsApp(d, "receipt", settings, customerBalance(d, data, settings.rates))} style={{ flex: "1 1 46%", background: "#11304a", color: "#7dd3fc", border: "1px solid #244a63", borderRadius: 10, padding: "9px", fontFamily: "inherit", fontWeight: 800, fontSize: 13 }}>✅ تأكيد</button>
+              {onExport && <button onClick={() => onExport(d)} style={miniBtn}>📄 PDF</button>}
+              {onExportImage && <button onClick={() => onExportImage(d)} style={miniBtn}>🖼️ صورة</button>}
+              {telNum && <button onClick={() => window.open("tel:" + telNum)} style={miniBtn}>📞 اتصال</button>}
             </div>
           </div>
         );
@@ -5005,6 +5066,46 @@ function StoreChargeSheet({ item, info, settings, onCancel, onConfirm }) {
         <button className="sn-btn sn-btn--ghost" onClick={onCancel}>إلغاء</button>
         <button className="sn-btn sn-btn--primary" disabled={!(Number(payment) > 0)} onClick={ok}>✅ تسجيل الجهاز + الشحن</button>
       </div>
+    </Sheet>
+  );
+}
+
+// لوحة تذكير الزبائن: تنتهي قريباً أو عليهم دين — مع زر واتساب واتصال لكل واحد
+function RemindersSheet({ data, settings, onClose }) {
+  const [tab, setTab] = useState("soon");
+  const within = Number(settings.soonDays || 3);
+  const devices = (data.devices || []).filter((d) => !d.archived);
+  const dueSoon = devices.map((d) => ({ d, dl: diffDays(todayStr(), d.endDate) })).filter((x) => !x.d.broken && x.dl <= within).sort((a, b) => a.dl - b.dl).map((x) => x.d);
+  const debtors = devices.filter((d) => Number(d.debt) > 0).sort((a, b) => (Number(b.debt) || 0) - (Number(a.debt) || 0));
+  const list = tab === "soon" ? dueSoon : debtors;
+  const seg = (k, lbl, n) => (
+    <button onClick={() => setTab(k)} style={{ flex: 1, background: tab === k ? "#1e2a4a" : "transparent", color: tab === k ? "#a9c2ff" : "#8b95ac", border: "1px solid #2a3a5e", borderRadius: 10, padding: "8px", fontFamily: "inherit", fontWeight: 800, fontSize: 13 }}>{lbl} ({n})</button>
+  );
+  return (
+    <Sheet title="📲 تذكير الزبائن" onClose={onClose}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        {seg("soon", "تنتهي قريباً", dueSoon.length)}
+        {seg("debt", "عليهم دين", debtors.length)}
+      </div>
+      <p className="sn-hint">اضغط 📲 بجانب كل زبون لإرسال رسالة واتساب جاهزة (واحداً تلو الآخر — لأن واتساب لا يسمح بفتح عدّة محادثات دفعة واحدة).</p>
+      {list.length === 0 && <p className="sn-hint" style={{ textAlign: "center" }}>لا أحد هنا 👍</p>}
+      {list.map((d) => {
+        const dl = diffDays(todayStr(), d.endDate);
+        const telNum = ((d.dialCode || "") + (d.phone || "")).replace(/\D/g, "");
+        const sub = tab === "soon" ? (dl < 0 ? `منتهٍ منذ ${-dl} يوم` : dl === 0 ? "ينتهي اليوم" : `يبقى ${dl} يوم`) : `دين ${money(d.debt)} ${d.debtCurrency || d.currency || "MRU"}`;
+        return (
+          <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#111a36", border: "1px solid #243352", borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 14 }}>{d.customerName || "بدون اسم"}</div>
+              <div style={{ color: dl < 0 && tab === "soon" ? "#fb7185" : "#8b95ac", fontSize: 12 }}>{sub}{d.phone ? ` • ${d.phone}` : ""}</div>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => openWhatsApp(d, "reminder", settings, customerBalance(d, data, settings.rates))} style={{ background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 10, padding: "8px 12px", fontFamily: "inherit", fontWeight: 800, fontSize: 15 }}>📲</button>
+              {telNum && <button onClick={() => window.open("tel:" + telNum)} style={{ background: "#1b2746", color: "#a9c2ff", border: "1px solid #2a3a5e", borderRadius: 10, padding: "8px 12px", fontFamily: "inherit", fontWeight: 800, fontSize: 15 }}>📞</button>}
+            </div>
+          </div>
+        );
+      })}
     </Sheet>
   );
 }

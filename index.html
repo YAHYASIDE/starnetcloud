@@ -18,8 +18,7 @@ window.addEventListener("error", function (ev) {
   window.__showErr(m || "script error");
 });
 window.addEventListener("unhandledrejection", function (ev) {
-  var r = ev && ev.reason;
-  window.__showErr("promise: " + ((r && (r.stack || r.message)) || r));
+  try { console.warn("unhandledrejection:", ev && ev.reason); } catch (e) {}
 });
 </script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
@@ -126,6 +125,6 @@ onAuthStateChanged(auth,async(user)=>{
 });
 </script>
 
-<script type="text/babel" src="app.jsx?v=24" data-presets="react"></script>
+<script type="text/babel" src="app.jsx?v=27" data-presets="react"></script>
 </body>
 </html>
