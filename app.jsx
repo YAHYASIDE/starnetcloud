@@ -2393,16 +2393,7 @@ function Dashboard({ data, settings, toBase, onRenew, onMarkPaid, onBroken, onCl
       {goCalendar && (
         <button className="sn-btn sn-btn--ghost sn-full" onClick={goCalendar}>🗓️ تقويم التجديدات الكامل — كل الأيام والتفاصيل</button>
       )}
-      <section className="sn-profit-grid">
-        <div className="sn-profit sn-profit--day">
-          <span className="sn-profit-lbl">أرباح اليوم</span>
-          <strong className={stats.dayProfit < 0 ? "sn-neg" : ""}>{money(stats.dayProfit)} <em>عملة</em></strong>
-        </div>
-        <div className="sn-profit sn-profit--month">
-          <span className="sn-profit-lbl">أرباح الشهر</span>
-          <strong className={stats.monthProfit < 0 ? "sn-neg" : ""}>{money(stats.monthProfit)} <em>عملة</em></strong>
-        </div>
-      </section>
+
 
       {settings.monthlyGoal > 0 && (
         <section className="sn-goal">
@@ -2415,29 +2406,16 @@ function Dashboard({ data, settings, toBase, onRenew, onMarkPaid, onBroken, onCl
         </section>
       )}
 
-      <section className="sn-close">
-        <div className="sn-close-h">🧮 إغلاق اليوم</div>
-        <div className="sn-close-grid">
-          <div className="sn-close-c"><span>دخل اليوم</span><strong className="sn-pos">{money(stats.dayIncome)}</strong></div>
-          <div className="sn-close-c"><span>مصروفات اليوم</span><strong className="sn-neg">{money(stats.dayExpense)}</strong></div>
-          <div className="sn-close-c"><span>صافي اليوم</span><strong className={stats.dayProfit < 0 ? "sn-neg" : "sn-pos"}>{money(stats.dayProfit)}</strong></div>
+      <section className="sn-stats-one" onClick={goDevices} style={{ background: "#111a36", border: "1px solid #243352", borderRadius: 16, padding: 14, marginBottom: 14, cursor: "pointer" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+          <span style={{ color: "#8b95ac", fontSize: 13 }}>إجمالي الأجهزة</span>
+          <strong style={{ fontSize: 26, fontWeight: 900 }}>{stats.total}</strong>
         </div>
-      </section>
-
-      <section className="sn-close">
-        <div className="sn-close-h">📅 ملخّص آخر ٧ أيام</div>
-        <div className="sn-close-grid">
-          <div className="sn-close-c"><span>المبيعات</span><strong>{money(stats.weekSales)}</strong></div>
-          <div className="sn-close-c"><span>الأرباح</span><strong className={stats.weekProfit < 0 ? "sn-neg" : "sn-pos"}>{money(stats.weekProfit)}</strong></div>
-          <div className="sn-close-c"><span>عمليات</span><strong>{stats.weekCount}</strong></div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, textAlign: "center" }}>
+          <div><div style={{ fontSize: 20, fontWeight: 900, color: "#34d399" }}>{stats.active}</div><div style={{ fontSize: 11.5, color: "#8b95ac" }}>نشطة</div></div>
+          <div><div style={{ fontSize: 20, fontWeight: 900, color: "#fbbf24" }}>{stats.urgent}</div><div style={{ fontSize: 11.5, color: "#8b95ac" }}>خلال 24س</div></div>
+          <div><div style={{ fontSize: 20, fontWeight: 900, color: "#fb7185" }}>{stats.expired}</div><div style={{ fontSize: 11.5, color: "#8b95ac" }}>منتهية</div></div>
         </div>
-      </section>
-
-      <section className="sn-stats">
-        <Stat n={stats.total} label="إجمالي الأجهزة" cls="t" onClick={goDevices} />
-        <Stat n={stats.active} label="نشطة" cls="ok" onClick={goDevices} />
-        <Stat n={stats.urgent} label="تنتهي خلال 24س" cls="warn" onClick={goDevices} />
-        <Stat n={stats.expired} label="منتهية" cls="bad" onClick={goDevices} />
       </section>
 
       <QuickLookup data={data} onWhats={onWhats} />
@@ -3219,11 +3197,14 @@ function Reports({ data, toBase, settings }) {
   const t = todayStr();
   const month = t.slice(0, 7);
   const [showLoss, setShowLoss] = useState(false);
+  const [showCal, setShowCal] = useState(false);
 
   const agg = useMemo(() => {
     let dayP = 0, monthP = 0, allP = 0, monthRevenue = 0, debt = 0, supplierUnpaid = 0;
     let storeP = 0, chargeP = 0, agentChargeP = 0, organicChargeP = 0;
     let usdChargeAll = 0, usdChargeMonth = 0, usdOwed = 0;
+    let dayIncome = 0, dayExpense = 0, weekProfit = 0, weekSales = 0, weekCount = 0;
+    const weekStart = addDays(t, -6);
     const byCur = {};
     const byCurExp = {};
     const devAgent = {};
@@ -3233,6 +3214,14 @@ function Reports({ data, toBase, settings }) {
       const profit = txProfit(tr, toBase);
       allP += profit;
       if (tr.deviceId) devProfit[tr.deviceId] = (devProfit[tr.deviceId] || 0) + profit;
+      if (tr.date === t) {
+        if (tr.isExpense) dayExpense += toBase(tr.amount, tr.currency);
+        else dayIncome += toBase(tr.amount, tr.currency);
+      }
+      if (tr.date >= weekStart && tr.date <= t) {
+        weekProfit += profit;
+        if (!tr.isExpense) { weekSales += toBase(tr.amount, tr.currency); weekCount++; }
+      }
       // فصل نظيف: بيع المتجر الصافي (بدون شحن) = أرباح المتجر، والمرتبط بجهاز = أرباح أجهزة (مفصولة: بدون مندوب / عبر مندوب)
       if (tr.saleId && !tr.deviceId) storeP += profit;
       else if (tr.deviceId) {
@@ -3272,7 +3261,7 @@ function Reports({ data, toBase, settings }) {
       .map((d) => ({ d, p: devProfit[d.id] }))
       .sort((a, b) => a.p - b.p);
     const lossTotal = lossDevices.reduce((s, x) => s + Math.min(0, x.p), 0);
-    return { dayP, monthP, allP, monthRevenue, debt, supplierUnpaid, byCur, byCurExp, agentsShare, myNet, storeP, chargeP, agentChargeP, organicChargeP, usdChargeAll, usdChargeMonth, usdOwed, devProfit, lossDevices, lossTotal };
+    return { dayP, monthP, allP, monthRevenue, debt, supplierUnpaid, byCur, byCurExp, agentsShare, myNet, storeP, chargeP, agentChargeP, organicChargeP, usdChargeAll, usdChargeMonth, usdOwed, devProfit, lossDevices, lossTotal, dayIncome, dayExpense, weekProfit, weekSales, weekCount };
   }, [data, toBase, t]);
 
   // أفضل الزبائن + إحصاء الدول + مقارنة الشهر بالماضي
@@ -3503,6 +3492,32 @@ function Reports({ data, toBase, settings }) {
           <MiniStat label="دولار مستحق لم يُدفع بعد" val={`${money(agg.usdOwed)} $`} danger={agg.usdOwed > 0} />
         </div>
         <p className="sn-hint">«دولار استُعمل في الشحن» = ما دفعته فعلاً للمورّد بالدولار. «مستحق لم يُدفع» = أجهزة تسلّفت شحنها ولم تسدّد للمورّد بعد.</p>
+      </section>
+
+      <section className="sn-close">
+        <div className="sn-close-h">🧮 إغلاق اليوم</div>
+        <div className="sn-close-grid">
+          <div className="sn-close-c"><span>دخل اليوم</span><strong className="sn-pos">{money(agg.dayIncome)}</strong></div>
+          <div className="sn-close-c"><span>مصروفات اليوم</span><strong className="sn-neg">{money(agg.dayExpense)}</strong></div>
+          <div className="sn-close-c"><span>صافي اليوم</span><strong className={agg.dayP < 0 ? "sn-neg" : "sn-pos"}>{money(agg.dayP)}</strong></div>
+        </div>
+      </section>
+
+      <section className="sn-close">
+        <div className="sn-close-h">📅 ملخّص آخر ٧ أيام</div>
+        <div className="sn-close-grid">
+          <div className="sn-close-c"><span>المبيعات</span><strong>{money(agg.weekSales)}</strong></div>
+          <div className="sn-close-c"><span>الأرباح</span><strong className={agg.weekProfit < 0 ? "sn-neg" : "sn-pos"}>{money(agg.weekProfit)}</strong></div>
+          <div className="sn-close-c"><span>عمليات</span><strong>{agg.weekCount}</strong></div>
+        </div>
+      </section>
+
+      <section className="sn-block">
+        <button onClick={() => setShowCal((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "transparent", border: "none", color: "#e7ecf6", fontFamily: "inherit", fontWeight: 800, fontSize: 15, padding: 0, cursor: "pointer" }}>
+          <span>🗓️ تقويم التجديدات الكامل</span>
+          <span>{showCal ? "▾" : "◂"}</span>
+        </button>
+        {showCal && <div style={{ marginTop: 10 }}><CalendarPanel data={data} /></div>}
       </section>
 
       <div className="sn-mini-grid sn-mini-grid--2">
@@ -4548,10 +4563,9 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
                 </div>
               </div>
               <div className="sn-agent-figs">
-                <span className={profit < 0 ? "sn-neg" : ""}>ربحي معه: {money(profit)} عملة</span>
-                <span>سُلّم له: {money(paid)} عملة</span>
-                {lossCount > 0 && <span className="sn-neg">خسائر معه: {money(Math.round(-agentLoss))} عملة ({lossCount} جهاز)</span>}
-                <span className={remain > 0 ? "sn-neg" : "sn-pos"}>{remain > 0 ? `تدين له بـ ${money(remain)}` : remain < 0 ? `زائد ${money(-remain)}` : "مُسوّى ✓"} عملة</span>
+                <span className={profit < 0 ? "sn-neg" : "sn-pos"}>💰 ربحي معه: {money(profit)} عملة</span>
+                {lossCount > 0 && <span className="sn-neg">📉 خسائري معه: {money(Math.round(-agentLoss))} عملة ({lossCount} جهاز)</span>}
+                {remain > 0 && <span className="sn-neg">تدين له بـ {money(remain)} عملة</span>}
               </div>
               <div className="sn-card-actions">
                 {onSettle && remain > 0 && (
