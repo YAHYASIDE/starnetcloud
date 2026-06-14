@@ -4644,25 +4644,6 @@ function AgentView({ agent, data, settings, onExport, onExportImage }) {
       {showCal && <div style={box}><CalendarPanel data={{ ...data, devices: myDevices }} /></div>}
 
       <div style={box}>
-        <button onClick={() => setOpenPaid((v) => !v)} style={fHead}><span>💰 المبلغ المُسلّم لك: {money(Math.round(paidToMe))} عملة</span><span>{openPaid ? "▾" : "◂"}</span></button>
-        {openPaid && (payouts.length ? payouts.slice().reverse().map((p, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13, color: "#cdd6f4" }}><span>{p.date || "—"}</span><span style={{ fontWeight: 800 }}>{money(p.amount)} عملة</span></div>
-        )) : <div style={{ ...lbl, marginTop: 8 }}>لا مدفوعات مسجّلة بعد.</div>)}
-      </div>
-
-      <div style={box}>
-        <button onClick={() => setOpenProfit((v) => !v)} style={fHead}><span>📊 ربحك هذا الشهر: {money(Math.round(shareMonth))} عملة</span><span>{openProfit ? "▾" : "◂"}</span></button>
-        {openProfit && (
-          <div style={{ marginTop: 8, fontSize: 13, color: "#cdd6f4" }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}><span>ربح أجهزتك هذا الشهر</span><span style={{ fontWeight: 800 }}>{money(Math.round(profitMonth))} عملة</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}><span>نسبتك</span><span style={{ fontWeight: 800 }}>{pct}%</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, color: "#6ee7b7" }}><span>نصيبك</span><span style={{ fontWeight: 900 }}>{money(Math.round(shareMonth))} عملة</span></div>
-            <p style={{ ...lbl, marginTop: 8 }}>يُحسب من أول الشهر ويبدأ من جديد مع بداية كل شهر.</p>
-          </div>
-        )}
-      </div>
-
-      <div style={box}>
         <button onClick={() => setOpenLoss((v) => !v)} style={fHead}><span>📉 أجهزة خاسرة: {lossDevices.length}{totalLoss < 0 ? ` (خسارة ${money(Math.round(-totalLoss))})` : ""}</span><span>{openLoss ? "▾" : "◂"}</span></button>
         {openLoss && (lossDevices.length ? lossDevices.map((d) => (
           <div key={d.id} style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13 }}><span>{d.customerName || "بدون اسم"}{d.accountNumber ? ` (${d.accountNumber})` : ""}</span><span style={{ fontWeight: 800, color: "#fb7185" }}>{money(Math.round(devProfit[d.id] || 0))} عملة</span></div>
