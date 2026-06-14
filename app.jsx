@@ -561,6 +561,8 @@ function StarNetApp() {
   const [sellingItem, setSellingItem] = useState(null); // صنف مخزون قيد البيع | null
   const [storeCharging, setStoreCharging] = useState(null); // {item, info} لشاشة بيع+شحن المبسّطة | null
   const [showReminders, setShowReminders] = useState(false); // لوحة تذكير الزبائن الجماعي
+  const [showActivity, setShowActivity] = useState(false); // لوحة الإشعارات/سجل النشاط
+  const [seenAt, setSeenAt] = useState(() => { try { return localStorage.getItem("sn_seen_" + ((typeof window !== "undefined" && window.__userEmail) || "")) || ""; } catch (e) { return ""; } });
   const [chargingPendingId, setChargingPendingId] = useState(null); // id لعنصر قيد التركيب يُشحن الآن | null
   const [renewing, setRenewing] = useState(null); // device | null
   const [collecting, setCollecting] = useState(null); // device being collected | null
@@ -577,6 +579,7 @@ function StarNetApp() {
     if (sellingItem) { setSellingItem(null); return; }
     if (storeCharging) { setStoreCharging(null); return; }
     if (showReminders) { setShowReminders(false); return; }
+    if (showActivity) { setShowActivity(false); return; }
     if (renewing) { setRenewing(null); return; }
     if (collecting) { setCollecting(null); return; }
     if (payingSupplier) { setPayingSupplier(null); return; }
@@ -593,6 +596,8 @@ function StarNetApp() {
   const [locked, setLocked] = useState(false);
   const [undoSnap, setUndoSnap] = useState(null); // {data, label}
   const loaded = useRef(false);
+  const prevDataRef = useRef(null); // لمقارنة التغييرات وتسجيل النشاط
+  const knownActIds = useRef(null); // معرّفات النشاط المعروفة (للإشعار اللحظي)
 
   // تحميل البيانات مرة واحدة
   useEffect(() => {
@@ -618,7 +623,26 @@ function StarNetApp() {
           if (!bk || bk.date !== todayStr()) await saveAutoBackup(fixed);
         } catch (e) {}
       } else {
-        setData(DEFAULT_DATA);
+        // 🛡️ أمان ضد فقدان البيانات: إن عاد التحميل فارغاً لكن توجد نسخة تلقائية فيها أجهزة، استعِدها بدل الإفراغ
+        let bkData = null;
+        try { const bk = await loadAutoBackup(); if (bk && bk.data && (bk.data.devices || []).length) bkData = bk.data; } catch (e) {}
+        if (bkData) {
+          const fixed = reconcileIncome({
+            ...DEFAULT_DATA,
+            ...bkData,
+            settings: { ...DEFAULT_DATA.settings, ...(bkData.settings || {}) },
+            agents: bkData.agents || [],
+            countries: bkData.countries && bkData.countries.length ? bkData.countries : DEFAULT_DATA.countries,
+            trash: bkData.trash || [],
+            contacts: bkData.contacts || [],
+            personColors: bkData.personColors || {},
+          });
+          fixed.personColors = assignPersonColors(fixed.devices, fixed.personColors);
+          fixed.personNumbers = assignPersonNumbers(fixed.devices, fixed.personNumbers);
+          setData(fixed);
+        } else {
+          setData(DEFAULT_DATA);
+        }
       }
       loaded.current = true;
       try { setSoundOn(((saved && saved.settings) || {}).sounds !== false); } catch (e) {}
@@ -627,7 +651,42 @@ function StarNetApp() {
 
   // حفظ تلقائي عند أي تغيير
   useEffect(() => {
-    if (loaded.current && data) persist(data);
+    if (loaded.current && data) {
+      // 🔔 رصد العمليات والتعديلات وتسجيلها في سجل النشاط (من فعل ماذا ومتى)
+      const prev = prevDataRef.current;
+      if (prev && prev !== data) {
+        const who = (typeof window !== "undefined" && window.__userEmail) || "—";
+        const now = new Date().toISOString();
+        const logs = [];
+        const prevTx = new Set((prev.transactions || []).map((t) => t.id));
+        const txDevIds = new Set();
+        (data.transactions || []).forEach((t) => {
+          if (!prevTx.has(t.id)) {
+            if (t.deviceId) txDevIds.add(t.deviceId);
+            const dev = (data.devices || []).find((x) => x.id === t.deviceId);
+            const nm = dev ? (dev.customerName || "زبون") : (t.buyerName || "");
+            logs.push(`${t.type || "عملية"}${nm ? " — " + nm : ""}${t.amount ? " (" + money(t.amount) + " " + (t.currency || "") + ")" : ""}`);
+          }
+        });
+        const prevDev = new Set((prev.devices || []).map((d) => d.id));
+        const curDev = new Set((data.devices || []).map((d) => d.id));
+        (data.devices || []).forEach((d) => { if (!prevDev.has(d.id)) logs.push(`➕ أضاف جهازاً — ${d.customerName || "بدون اسم"}`); });
+        (prev.devices || []).forEach((d) => { if (!curDev.has(d.id)) logs.push(`🗑️ حذف جهازاً — ${d.customerName || "بدون اسم"}`); });
+        const sig = (d) => { try { return JSON.stringify({ ...d, photos: undefined, audio: undefined }); } catch (e) { return ""; } };
+        const prevMap = {}; (prev.devices || []).forEach((d) => { prevMap[d.id] = d; });
+        (data.devices || []).forEach((d) => {
+          if (prevMap[d.id] && !txDevIds.has(d.id) && sig(prevMap[d.id]) !== sig(d)) logs.push(`✏️ عدّل جهازاً — ${d.customerName || "بدون اسم"}`);
+        });
+        if (logs.length) {
+          const entries = logs.slice(0, 10).map((a, i) => ({ id: uid() + "_" + i, user: who, action: a, time: now }));
+          setData((d) => ({ ...d, activityLog: [...entries, ...((d.activityLog) || [])].slice(0, 300) }));
+        }
+      }
+      prevDataRef.current = data;
+      persist(data);
+      // 🛡️ حدّث النسخة الاحتياطية التلقائية فقط إذا كانت البيانات سليمة (فيها أجهزة) — حتى لا تُكتب نسخة فارغة فوق الجيدة
+      if ((data.devices || []).length) { try { saveAutoBackup(data); } catch (e) {} }
+    }
   }, [data]);
 
   // تنبيه تلقائي عند فتح التطبيق بما يستحق اليوم (إن سُمح بالتنبيهات)
@@ -646,6 +705,25 @@ function StarNetApp() {
       }
     } catch (e) {}
   }, [data]);
+
+  // 🔔 الإشعار اللحظي: عند أي عملية من مستخدم آخر، يصلك إشعار نظام فوري
+  useEffect(() => {
+    try { if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission(); } catch (e) {}
+    const nm = (em) => { const x = (em || "").toLowerCase(); if (x.includes("etssadaga6")) return "المساعد"; if (x === "etssadaga@gmail.com") return "المدير الثاني"; if (x.includes("yahyaazawadi")) return "المدير"; return "مستخدم"; };
+    window.__onRemoteActivity = (remote) => {
+      try {
+        if (!remote) return;
+        const myE = (typeof window !== "undefined" && window.__userEmail) || "";
+        if (knownActIds.current === null) { knownActIds.current = new Set((remote.activityLog || []).map((e) => e.id)); return; }
+        const fresh = (remote.activityLog || []).filter((e) => e.user !== myE && !knownActIds.current.has(e.id));
+        fresh.forEach((e) => knownActIds.current.add(e.id));
+        if (fresh.length && typeof Notification !== "undefined" && Notification.permission === "granted") {
+          fresh.slice(0, 6).forEach((e) => { try { new Notification("STAR NET ⭐ — " + nm(e.user), { body: e.action }); } catch (_) {} });
+        }
+      } catch (e) {}
+    };
+    return () => { try { delete window.__onRemoteActivity; } catch (e) {} };
+  }, []);
 
   // اختصارات الشاشة الرئيسية (PWA shortcuts)
   useEffect(() => {
@@ -677,6 +755,17 @@ function StarNetApp() {
 
   /* --------- عمليات على البيانات --------- */
   const settings = data?.settings || DEFAULT_DATA.settings;
+  const myEmail = (typeof window !== "undefined" && window.__userEmail) || "";
+  const unseenCount = (data?.activityLog || []).filter((e) => e.user !== myEmail && (!seenAt || e.time > seenAt)).length;
+  function openActivity() {
+    setShowActivity(true);
+    setDrawer(false);
+    try { if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission(); } catch (e) {}
+    const latest = (data?.activityLog || [])[0];
+    const t = latest ? latest.time : new Date().toISOString();
+    setSeenAt(t);
+    try { localStorage.setItem("sn_seen_" + myEmail, t); } catch (e) {}
+  }
 
   const toBase = (amount, currency) => {
     const r = settings.rates[currency] ?? 1;
@@ -1456,7 +1545,7 @@ function StarNetApp() {
       {/* الرأس */}
       <header className="sn-header">
         <div className="sn-stars" aria-hidden="true" />
-        <button className="sn-hbtn sn-menu-btn" onClick={() => setDrawer(true)} aria-label="القائمة">☰</button>
+        <button className="sn-hbtn sn-menu-btn" onClick={() => setDrawer(true)} aria-label="القائمة">☰{unseenCount > 0 && <span style={{ position: "absolute", top: -5, insetInlineEnd: -5, background: "#fb7185", color: "#fff", borderRadius: 999, minWidth: 18, height: 18, fontSize: 11, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px", border: "2px solid #0a1024" }}>{unseenCount}</span>}</button>
         <button className="sn-hbtn sn-add-btn" onClick={() => setEditing("new")} aria-label="إضافة جهاز">+</button>
         <div className="sn-brand">
           <span className="sn-logo">⭐</span>
@@ -1482,6 +1571,11 @@ function StarNetApp() {
               <button className="sn-drawer-item" onClick={() => { setEditing("new"); setDrawer(false); }}>
                 <span className="sn-drawer-ic">➕</span>
                 <span className="sn-drawer-lbl">إضافة جهاز جديد</span>
+              </button>
+              <button className="sn-drawer-item" onClick={openActivity}>
+                <span className="sn-drawer-ic">🔔</span>
+                <span className="sn-drawer-lbl">الإشعارات وسجل النشاط</span>
+                {unseenCount > 0 && <span style={{ marginInlineStart: "auto", background: "#fb7185", color: "#fff", borderRadius: 999, padding: "2px 9px", fontSize: 12, fontWeight: 900 }}>{unseenCount}</span>}
               </button>
               <button className="sn-drawer-item" onClick={() => { setShowReminders(true); setDrawer(false); }}>
                 <span className="sn-drawer-ic">📲</span>
@@ -1668,6 +1762,9 @@ function StarNetApp() {
       )}
       {showReminders && (
         <RemindersSheet data={data} settings={settings} onClose={() => setShowReminders(false)} />
+      )}
+      {showActivity && (
+        <ActivitySheet data={data} myEmail={myEmail} onClose={() => setShowActivity(false)} />
       )}
       {editingContact && (
         <ContactForm
@@ -5091,6 +5188,38 @@ function RemindersSheet({ data, settings, onClose }) {
   );
 }
 
+// لوحة الإشعارات / سجل النشاط: من فعل ماذا ومتى
+function ActivitySheet({ data, myEmail, onClose }) {
+  const log = data.activityLog || [];
+  const nameOf = (email) => {
+    if (email && email === myEmail) return "أنت";
+    const e = (email || "").toLowerCase();
+    if (e.includes("etssadaga6")) return "المساعد (الحسين)";
+    if (e === "etssadaga@gmail.com") return "المدير الثاني";
+    if (e.includes("yahyaazawadi")) return "المدير";
+    return email || "—";
+  };
+  const fmtT = (iso) => { try { const d = new Date(iso); const p = (n) => String(n).padStart(2, "0"); return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`; } catch (e) { return ""; } };
+  return (
+    <Sheet title="🔔 الإشعارات وسجل النشاط" onClose={onClose}>
+      <p className="sn-hint">كل عملية أو تعديل يقوم به أي مستخدم — من فعلها ومتى. (آخر 300 عملية)</p>
+      {log.length === 0 && <p className="sn-hint" style={{ textAlign: "center" }}>لا نشاط بعد.</p>}
+      {log.map((e) => {
+        const mine = e.user === myEmail;
+        return (
+          <div key={e.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, background: mine ? "#111a36" : "rgba(99,179,237,.10)", border: "1px solid " + (mine ? "#243352" : "#2a4a6e"), borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 13.5 }}>{e.action}</div>
+              <div style={{ color: mine ? "#8b95ac" : "#7dd3fc", fontSize: 12, fontWeight: mine ? 400 : 800 }}>{nameOf(e.user)}</div>
+            </div>
+            <div style={{ color: "#8b95ac", fontSize: 11.5, whiteSpace: "nowrap" }}>{fmtT(e.time)}</div>
+          </div>
+        );
+      })}
+    </Sheet>
+  );
+}
+
 function InventoryPanel({ data, onAdd, onAdjust, onDelete, onSell, onSellDevice, onChargePending, onDeletePending, onDeleteSale }) {
   const [cat, setCat] = useState("device");
   const [showSales, setShowSales] = useState(false);
@@ -5522,18 +5651,19 @@ function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, 
     window.XLSX.utils.book_append_sheet(wb, ws, "الأجهزة");
     window.XLSX.writeFile(wb, `اجهزة_STARNET_${todayStr()}.xlsx`);
   };
+  const bkName = () => { const d = new Date(); const p = (n) => String(n).padStart(2, "0"); return `starnet-backup-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}.json`; };
   const exportData = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `starnet-backup-${todayStr()}.json`;
+    a.download = bkName();
     a.click();
     URL.revokeObjectURL(url);
   };
   const shareData = async () => {
     const json = JSON.stringify(data, null, 2);
-    const name = `starnet-backup-${todayStr()}.json`;
+    const name = bkName();
     try {
       const file = new File([json], name, { type: "application/json" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -5643,7 +5773,7 @@ function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, 
       {kind === "backup" && (
         <>
           <div className="sn-end-preview" style={{ background: "rgba(52,211,153,.1)", borderColor: "rgba(52,211,153,.3)", color: "#bfedd6" }}>
-            ☁️ بياناتك تُحفظ تلقائياً في السحابة عند كل تغيير، وتظهر على كل أجهزتك بعد تسجيل الدخول. النسخ أدناه إضافية (احتياط على ملف/درايف).
+            ☁️ بياناتك تُحفظ تلقائياً في السحابة عند كل تغيير، وتظهر على كل أجهزتك بعد تسجيل الدخول. كما تُحفظ نسخة احتياطية تلقائية في **السحابة والهاتف** معاً بعد كل عملية. والنسخ أدناه إضافية (ملف تحتفظ به / درايف).
           </div>
           <div className="sn-grid2">
             <button className="sn-btn sn-btn--ghost" onClick={exportData}>⬇️ تصدير ملف</button>

@@ -80,7 +80,7 @@ window.__tryMount = function(){ var s=window.__state; if(s.authReady && s.mountF
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig={apiKey:"AIzaSyDDmM2KQV8FoMK0SbK6-yXC1eY41VH0Nl8",authDomain:"yahyanajim-92897.firebaseapp.com",projectId:"yahyanajim-92897",storageBucket:"yahyanajim-92897.firebasestorage.app",messagingSenderId:"894821585663",appId:"1:894821585663:web:597ff582d6034eea88f2ca"};
 
@@ -96,9 +96,11 @@ window.__logout=()=>{try{signOut(auth);}catch(e){}};
 
 // التخزين السحابي المشترك: مستند واحد business/main يصل إليه الثلاثة
 const SHARED=doc(db,"business","main");
-let cache={},saveTimer=null;
+const BACKUP=doc(db,"business","backup"); // نسخة احتياطية سحابية منفصلة
+let cache={},saveTimer=null,bkTimer=null;
 function scheduleSave(){const st=$("sync-status");if(st){st.textContent="… يحفظ";st.style.color="#fbbf24";}clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{try{await setDoc(SHARED,cache);if(st){st.textContent="✓ محفوظ سحابياً";st.style.color="#6ee7b7";}}catch(e){console.error(e);if(st){st.textContent="⚠️ تعذّر الحفظ";st.style.color="#fca5a5";}}},700);}
-function setupStorage(uid){window.storage={async get(k){if(k==="starnet_autobackup"){try{const v=localStorage.getItem("sn_bk");return v==null?null:{key:k,value:v};}catch(e){return null;}}return(k in cache&&cache[k]!=null)?{key:k,value:cache[k]}:null;},async set(k,v){if(k==="starnet_autobackup"){try{localStorage.setItem("sn_bk",v);}catch(e){}return{key:k,value:v};}cache[k]=v;scheduleSave();return{key:k,value:v};},async delete(k){delete cache[k];scheduleSave();return{key:k,deleted:true};},async list(p){return{keys:Object.keys(cache).filter(x=>!p||x.startsWith(p)),prefix:p};}};}
+function scheduleBackupSave(v){clearTimeout(bkTimer);bkTimer=setTimeout(async()=>{try{await setDoc(BACKUP,{value:v,at:Date.now()});}catch(e){console.warn("backup",e);}},1500);}
+function setupStorage(uid){window.storage={async get(k){if(k==="starnet_autobackup"){try{const sd=await getDoc(BACKUP);if(sd.exists()&&sd.data()&&sd.data().value)return{key:k,value:sd.data().value};}catch(e){}try{const v=localStorage.getItem("sn_bk");return v==null?null:{key:k,value:v};}catch(e){return null;}}return(k in cache&&cache[k]!=null)?{key:k,value:cache[k]}:null;},async set(k,v){if(k==="starnet_autobackup"){try{localStorage.setItem("sn_bk",v);}catch(e){}scheduleBackupSave(v);return{key:k,value:v};}cache[k]=v;scheduleSave();return{key:k,value:v};},async delete(k){delete cache[k];scheduleSave();return{key:k,deleted:true};},async list(p){return{keys:Object.keys(cache).filter(x=>!p||x.startsWith(p)),prefix:p};}};}
 
 onAuthStateChanged(auth,async(user)=>{
   if(user){
@@ -116,6 +118,16 @@ onAuthStateChanged(auth,async(user)=>{
     window.__userEmail=email;
     window.__state.authReady=true; window.__tryMount();
     $("login").style.display="none"; $("topbar").style.display="flex";
+    // 🔔 مراقبة لحظية: إشعار فوري عند أي عملية من مستخدم آخر (دون لمس البيانات لتفادي التعارض)
+    try{
+      onSnapshot(SHARED,(snap)=>{
+        try{
+          if(snap.metadata && snap.metadata.hasPendingWrites) return; // تجاهل كتاباتي المحلية
+          const d=snap.data()||{};
+          if(window.__onRemoteActivity && d["starnet_data_v1"]){ window.__onRemoteActivity(JSON.parse(d["starnet_data_v1"])); }
+        }catch(e){}
+      });
+    }catch(e){console.warn(e);}
   } else {
     window.__state.authReady=false; window.__state.mounted=false; window.__userEmail=null;
     document.body.classList.remove("signed");
@@ -125,6 +137,6 @@ onAuthStateChanged(auth,async(user)=>{
 });
 </script>
 
-<script type="text/babel" src="app.jsx?v=28" data-presets="react"></script>
+<script type="text/babel" src="app.jsx?v=32" data-presets="react"></script>
 </body>
 </html>
