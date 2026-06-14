@@ -1042,6 +1042,11 @@ function StarNetApp() {
     flash(ok ? "تم فتح صفحة الطباعة — اختر «حفظ PDF» 📄" : "تعذّر التصدير");
   }
 
+  function handleExportImage(device) {
+    const ok = exportCustomerImage(device, data, settings);
+    flash(ok ? "نُزّلت صورة الزبون — أرسلها عبر واتساب 🖼️" : "تعذّر إنشاء الصورة");
+  }
+
   function setCountries(list) {
     setData((d) => ({ ...d, countries: list }));
   }
@@ -1545,6 +1550,7 @@ function StarNetApp() {
             onUnbreak={unBreak}
             onCopy={handleCopy}
             onExport={handleExport}
+            onExportImage={handleExportImage}
             onArchive={archiveDevice}
             onInstall={cycleInstall}
             onWhats={(dev, kind) => openWhatsApp(dev, kind, settings, customerBalance(dev, data, settings.rates))}
@@ -1946,6 +1952,91 @@ ${devCards || "<p>لا أجهزة</p>"}
     a.download = `عميل-${device.customerName || "بدون اسم"}.html`;
     a.click();
     URL.revokeObjectURL(url);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// تصدير بطاقة الزبون كصورة PNG جاهزة للإرسال عبر واتساب
+function exportCustomerImage(device, data, settings) {
+  try {
+    const devs = data.devices.filter((d) => sameCustomer(d, device));
+    const bal = customerBalance(device, data, settings.rates);
+    const W = 860, pad = 44, dpr = 2;
+    const FS = "Tahoma, Arial, sans-serif";
+    // بناء قائمة الأسطر لحساب الارتفاع ثم الرسم
+    const items = [];
+    items.push({ t: "brand" });
+    items.push({ t: "title", v: device.customerName || "زبون" });
+    items.push({ t: "kv", k: "📞 الهاتف", v: (device.dialCode || "") + (device.phone || "—") });
+    if (device.email) items.push({ t: "kv", k: "📧 البريد", v: device.email });
+    items.push({ t: "kv", k: "📦 عدد الأجهزة", v: String(devs.length) });
+    items.push({ t: "bal" });
+    devs.forEach((d) => {
+      items.push({ t: "dev", v: (d.accountNumber || "بدون رقم حساب") + " — " + (d.broken ? "معطّل" : statusOf(d).label) });
+      if (d.kit) items.push({ t: "kv", k: "KIT", v: d.kit });
+      if (d.package) items.push({ t: "kv", k: "الباقة", v: d.package });
+      items.push({ t: "kv", k: "تاريخ الشحن", v: fmtDate(d.startDate) });
+      items.push({ t: "kv", k: "تاريخ الانتهاء", v: fmtDate(d.endDate) });
+      items.push({ t: "kv", k: "المدة", v: (d.durationDays || "—") + " يوم" });
+      if (d.email) items.push({ t: "kv", k: "البريد", v: d.email });
+      if (d.debt > 0) items.push({ t: "kv", k: "الدين المتبقي", v: money(d.debt) + " " + symbolOf(d.debtCurrency || d.currency) });
+    });
+    const hOf = (it) => it.t === "brand" ? 84 : it.t === "title" ? 52 : it.t === "bal" ? 64 : it.t === "dev" ? 50 : 34;
+    let H = pad * 2;
+    items.forEach((it) => { H += hOf(it); });
+    const canvas = document.createElement("canvas");
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.textBaseline = "middle";
+    ctx.direction = "rtl";
+    // خلفية
+    ctx.fillStyle = "#0a1024"; ctx.fillRect(0, 0, W, H);
+    const rrect = (x, y, w, h, r, fill, stroke) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+      if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+      if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+    };
+    let y = pad;
+    items.forEach((it) => {
+      const h = hOf(it);
+      const cy = y + h / 2;
+      if (it.t === "brand") {
+        ctx.textAlign = "right"; ctx.fillStyle = "#ffd27a"; ctx.font = "800 30px " + FS;
+        ctx.fillText("⭐ " + (settings.businessName || "STAR NET"), W - pad, cy - 12);
+        ctx.fillStyle = "#8b95ac"; ctx.font = "400 16px " + FS;
+        ctx.fillText("بطاقة زبون — " + fmtDate(todayStr()), W - pad, cy + 16);
+      } else if (it.t === "title") {
+        ctx.textAlign = "right"; ctx.fillStyle = "#e7ecf6"; ctx.font = "900 30px " + FS;
+        ctx.fillText(it.v, W - pad, cy);
+      } else if (it.t === "bal") {
+        const net = bal.net;
+        const txt = net > 0 ? "💰 المتبقي عليه (دين): " + money(net) + " MRU" : net < 0 ? "💳 رصيده المحفوظ: " + money(-net) + " MRU" : "✅ لا دين ولا رصيد";
+        const col = net > 0 ? "#fb7185" : net < 0 ? "#34d399" : "#9fb0d0";
+        rrect(pad, y + 6, W - pad * 2, h - 12, 12, "rgba(255,255,255,.04)", "#243352");
+        ctx.textAlign = "right"; ctx.fillStyle = col; ctx.font = "800 19px " + FS;
+        ctx.fillText(txt, W - pad - 14, cy);
+      } else if (it.t === "dev") {
+        rrect(pad, y + 5, W - pad * 2, h - 10, 10, "#111a36", "#243352");
+        ctx.textAlign = "right"; ctx.fillStyle = "#a9c2ff"; ctx.font = "800 18px " + FS;
+        ctx.fillText("📡 " + it.v, W - pad - 14, cy);
+      } else {
+        ctx.textAlign = "right"; ctx.fillStyle = "#8b95ac"; ctx.font = "400 16px " + FS;
+        ctx.fillText(it.k, W - pad - 14, cy);
+        ctx.textAlign = "left"; ctx.fillStyle = "#e7ecf6"; ctx.font = "700 16px " + FS;
+        ctx.fillText(String(it.v), pad + 14, cy);
+      }
+      y += h;
+    });
+    const url = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "زبون-" + (device.customerName || "بطاقة") + ".png";
+    a.click();
     return true;
   } catch (e) {
     return false;
@@ -2441,7 +2532,7 @@ function MicButton({ lang, label, onText }) {
   );
 }
 
-function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkPaid, onBroken, onUnbreak, onCopy, onExport, onArchive, onInstall, onWhats }) {
+function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkPaid, onBroken, onUnbreak, onCopy, onExport, onExportImage, onArchive, onInstall, onWhats }) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("all");
 
@@ -2581,6 +2672,7 @@ function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkP
             onUnbreak={onUnbreak}
             onCopy={onCopy}
             onExport={onExport}
+            onExportImage={onExportImage}
             onArchive={onArchive}
             onInstall={onInstall}
             onWhats={onWhats}
@@ -2654,7 +2746,7 @@ function CField({ k, v, danger, copy, onCopy, color, secret }) {
   );
 }
 
-function DeviceCard({ d, agents = [], countries = [], balance, compact = false, dupReasons = [], personColor, personNumber, toBase, txs = [], onEdit, onRenew, onDelete, onClearDebt, onMarkPaid, onBroken, onUnbreak, onCopy, onExport, onArchive, onInstall, onWhats }) {
+function DeviceCard({ d, agents = [], countries = [], balance, compact = false, dupReasons = [], personColor, personNumber, toBase, txs = [], onEdit, onRenew, onDelete, onClearDebt, onMarkPaid, onBroken, onUnbreak, onCopy, onExport, onExportImage, onArchive, onInstall, onWhats }) {
   const [open, setOpen] = useState(false);
   const [showProfit, setShowProfit] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
@@ -2775,6 +2867,7 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
             {onWhats && <button className="sn-quick-btn" onClick={() => onWhats(d, "reminder")} title="واتساب" aria-label="واتساب">💬</button>}
             <button className={"sn-quick-btn" + (showProfit ? " sn-quick-on" : "")} onClick={() => setShowProfit(!showProfit)} title="الأرباح" aria-label="الأرباح">💰</button>
             {onExport && <button className="sn-quick-btn" onClick={() => onExport(d)} title="PDF" aria-label="PDF">📄</button>}
+            {onExportImage && <button className="sn-quick-btn" onClick={() => onExportImage(d)} title="صورة للواتساب" aria-label="صورة">🖼️</button>}
             {onDelete && <HoldIcon icon="🗑️" title="حذف (اضغط مطوّلاً)" danger onHold={() => onDelete(d)} />}
           </div>
           <Countdown endDate={d.endDate} broken={d.broken} compact />
@@ -2871,6 +2964,7 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
             <HoldButton icon="🧾" label="إيصال" variant="blue" onAct={() => onWhats(d, "receipt")} />
             <HoldButton icon="✏️" label="تعديل" hold onAct={() => onEdit(d)} />
             {onExport && <HoldButton icon="📄" label="PDF" variant="blue" onAct={() => onExport(d)} />}
+            {onExportImage && <HoldButton icon="🖼️" label="صورة" variant="blue" onAct={() => onExportImage(d)} />}
             {!compact && (
               <HoldButton icon="📲" label="مشاركة" variant="blue" onAct={() => {
                 const txt = [
@@ -3008,6 +3102,7 @@ function Reports({ data, toBase, settings }) {
   const agg = useMemo(() => {
     let dayP = 0, monthP = 0, allP = 0, monthRevenue = 0, debt = 0, supplierUnpaid = 0;
     let storeP = 0, chargeP = 0;
+    let usdChargeAll = 0, usdChargeMonth = 0, usdOwed = 0;
     const byCur = {};
     const byCurExp = {};
     data.transactions.forEach((tr) => {
@@ -3016,6 +3111,11 @@ function Reports({ data, toBase, settings }) {
       // فصل نظيف: عمليات مرتبطة بجهاز زبون (شحن/بيع+شحن) = أرباح الأجهزة والشحن، وبيع المتجر الصافي (بدون شحن) = أرباح المتجر
       if (tr.saleId && !tr.deviceId) storeP += profit;
       else if (tr.deviceId) chargeP += profit;
+      // دولار الشحن: ما دُفع للمورّد فعلاً (بالدولار)
+      if (tr.type === "دفع للمورّد") {
+        usdChargeAll += Number(tr.amount) || 0;
+        if ((tr.date || "").slice(0, 7) === month) usdChargeMonth += Number(tr.amount) || 0;
+      }
       if (tr.date === t) dayP += profit;
       if (tr.date.slice(0, 7) === month) {
         monthP += profit;
@@ -3029,7 +3129,7 @@ function Reports({ data, toBase, settings }) {
     });
     data.devices.forEach((d) => {
       if (d.debt) debt += toBase(d.debt, d.debtCurrency || d.currency || "MRU");
-      if (!d.costPaid && d.cost && !d.broken) supplierUnpaid += toBase(d.cost, d.costCurrency || "USDT");
+      if (!d.costPaid && d.cost && !d.broken) { supplierUnpaid += toBase(d.cost, d.costCurrency || "USDT"); usdOwed += Number(d.cost) || 0; }
     });
     // نصيب المندوبين من الأرباح، وصافي ربحي وحدي
     let agentsShare = 0;
@@ -3038,7 +3138,7 @@ function Reports({ data, toBase, settings }) {
       if (ap > 0) agentsShare += ap * (Number(a.percent) || 0) / 100;
     });
     const myNet = allP - agentsShare;
-    return { dayP, monthP, allP, monthRevenue, debt, supplierUnpaid, byCur, byCurExp, agentsShare, myNet, storeP, chargeP };
+    return { dayP, monthP, allP, monthRevenue, debt, supplierUnpaid, byCur, byCurExp, agentsShare, myNet, storeP, chargeP, usdChargeAll, usdChargeMonth, usdOwed };
   }, [data, toBase, t]);
 
   // أفضل الزبائن + إحصاء الدول + مقارنة الشهر بالماضي
@@ -3078,18 +3178,16 @@ function Reports({ data, toBase, settings }) {
       else flowByCur[cur].in += Number(tr.amount) || 0;
     });
     const byCurArr = Object.entries(flowByCur).map(([cur, v]) => ({ cur, inc: v.in, out: v.out, net: v.in - v.out }));
-    // الإحالات: من جلب أكثر زبائن (حسب اسم المُحيل، زبائن فريدون)
+    // الإحالات: كم جهازاً (وكم زبوناً) جلب كل مُحيل
     const refMap = {};
-    const refSeen = new Set();
     data.devices.forEach((d) => {
       const r = (d.referredBy || "").trim();
       if (!r) return;
-      const ck = r + "|" + personKey(d);
-      if (refSeen.has(ck)) return;
-      refSeen.add(ck);
-      refMap[r] = (refMap[r] || 0) + 1;
+      if (!refMap[r]) refMap[r] = { devices: 0, custs: new Set() };
+      refMap[r].devices++;
+      refMap[r].custs.add(personKey(d));
     });
-    const referrals = Object.entries(refMap).map(([n, c]) => ({ n, c })).sort((a, b) => b.c - a.c);
+    const referrals = Object.entries(refMap).map(([n, o]) => ({ n, c: o.devices, cust: o.custs.size })).sort((a, b) => b.c - a.c);
     const pct = (cur, prev) => prev > 0 ? Math.round((cur - prev) / prev * 100) : (cur > 0 ? 100 : 0);
     return { monthSales, lastSales, monthProfit, lastProfit, topCustomers, countries, byCurArr, referrals, salesPct: pct(monthSales, lastSales), profitPct: pct(monthProfit, lastProfit) };
   }, [data, toBase, month]);
@@ -3189,7 +3287,7 @@ function Reports({ data, toBase, settings }) {
             <div className="sn-rank-row" key={r.n}>
               <span className="sn-rank-no">{i + 1}</span>
               <span className="sn-rank-name">{r.n}</span>
-              <span className="sn-rank-val sn-pos">{r.c} زبون</span>
+              <span className="sn-rank-val sn-pos">{r.c} جهاز{r.cust !== r.c ? ` • ${r.cust} زبون` : ""}</span>
             </div>
           ))}
           <p className="sn-hint">فكرة: امنح من يجلب أكثر زبائن خصماً أو مكافأة. 🎁</p>
@@ -3234,6 +3332,16 @@ function Reports({ data, toBase, settings }) {
         <MiniStat label="🛒 أرباح المتجر (بيع بدون شحن + اكسسوارات)" val={`${money(agg.storeP)} عملة`} danger={agg.storeP < 0} />
         <MiniStat label="📡 أرباح الأجهزة والشحن (اشتراكات + بيع مع شحن)" val={`${money(agg.chargeP)} عملة`} danger={agg.chargeP < 0} />
       </div>
+
+      <section className="sn-block">
+        <h2>💵 كشف الدولار في الشحن</h2>
+        <div className="sn-mini-grid">
+          <MiniStat label="دولار استُعمل في الشحن (الكل)" val={`${money(agg.usdChargeAll)} $`} />
+          <MiniStat label="دولار هذا الشهر" val={`${money(agg.usdChargeMonth)} $`} />
+          <MiniStat label="دولار مستحق لم يُدفع بعد" val={`${money(agg.usdOwed)} $`} danger={agg.usdOwed > 0} />
+        </div>
+        <p className="sn-hint">«دولار استُعمل في الشحن» = ما دفعته فعلاً للمورّد بالدولار. «مستحق لم يُدفع» = أجهزة تسلّفت شحنها ولم تسدّد للمورّد بعد.</p>
+      </section>
 
       <div className="sn-mini-grid sn-mini-grid--2">
         <MiniStat label="صافي ربحي وحدي" val={`${money(agg.myNet)} عملة`} danger={agg.myNet < 0} />
@@ -3866,7 +3974,10 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
       </Field>
 
       <Field label="🧑‍🤝‍🧑 من أحاله؟ (اختياري)">
-        <input value={f.referredBy || ""} onChange={(e) => set("referredBy", e.target.value)} placeholder="اسم من جلب هذا الزبون" />
+        <input list="sn-referrers" value={f.referredBy || ""} onChange={(e) => set("referredBy", e.target.value)} placeholder="اسم من جلب هذا الزبون" />
+        <datalist id="sn-referrers">
+          {[...new Set((devices || []).map((d) => (d.referredBy || "").trim()).filter(Boolean))].map((nm) => <option key={nm} value={nm} />)}
+        </datalist>
       </Field>
 
       <div className="sn-media-bar">
