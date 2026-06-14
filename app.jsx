@@ -383,7 +383,7 @@ function copyToClipboard(text) {
 function statusOf(device) {
   if (device.broken) return { key: "broken", label: "معطّل", days: 0 };
   const dl = diffDays(todayStr(), device.endDate);
-  if (dl < 0) return { key: "expired", label: "منتهي", days: dl };
+  if (dl <= 0) return { key: "expired", label: "منتهي", days: dl };
   if (dl <= 1) return { key: "urgent", label: "ينتهي خلال 24س", days: dl };
   if (dl <= 3) return { key: "soon", label: "ينتهي قريباً", days: dl };
   return { key: "active", label: "نشط", days: dl };
@@ -1916,7 +1916,7 @@ function openWhatsApp(device, kind, settings, balance) {
   let remainingLine = "";
   if (device.endDate) {
     const ed = parseDate(device.endDate);
-    ed.setHours(23, 59, 59, 999);
+    ed.setHours(0, 0, 0, 0);
     let diff = ed.getTime() - Date.now();
     const past = diff < 0;
     diff = Math.abs(diff);
@@ -2175,7 +2175,7 @@ function Countdown({ endDate, broken, compact }) {
   if (broken) return <span className="sn-cd sn-cd--off">⛔ معطّل</span>;
   if (!endDate) return null;
   const d = parseDate(endDate);
-  d.setHours(23, 59, 59, 999);
+  d.setHours(0, 0, 0, 0);
   let diff = d.getTime() - now;
   const past = diff < 0;
   diff = Math.abs(diff);
@@ -4688,7 +4688,7 @@ function AgentView({ agent, data, settings, onExport, onExportImage }) {
   const myIds = new Set(myDevices.map((d) => d.id));
   const rates = (settings && settings.rates) || {};
   const toBase = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
-  const activeCount = myDevices.filter((d) => !d.broken && diffDays(todayStr(), d.endDate) >= 0).length;
+  const activeCount = myDevices.filter((d) => !d.broken && diffDays(todayStr(), d.endDate) > 0).length;
   const brokenCount = myDevices.filter((d) => d.broken).length;
   let totalDebt = 0;
   myDevices.forEach((d) => { if (Number(d.debt) > 0) totalDebt += toBase(Number(d.debt), d.debtCurrency || d.currency || "MRU"); });
