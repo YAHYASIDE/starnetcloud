@@ -1875,6 +1875,7 @@ function StarNetApp() {
           agent={accountAgent}
           data={data}
           toBase={toBase}
+          settings={settings}
           onClose={() => setAccountAgent(null)}
           onAddCredit={(amt, note) => addAgentLedger(accountAgent, "credit", amt, note)}
           onWithdraw={(amt, note) => addAgentLedger(accountAgent, "debit", amt, note)}
@@ -4623,10 +4624,25 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
 }
 
 // شاشة الحساب الجاري للمندوب: رصيد، إضافة، سحب، وكشف حساب
-function AgentAccountSheet({ agent, data, toBase, onClose, onAddCredit, onWithdraw, onSettle, onDeleteEntry }) {
+function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit, onWithdraw, onSettle, onDeleteEntry }) {
   const bal = agentBalance(agent, data, toBase);
   const devCount = (data.devices || []).filter((d) => d.agentId === agent.id).length;
   const grossProfit = agentProfit(agent.id, data, toBase);
+  const rates = (settings && settings.rates) || { USDT: 430, FCFA: 3.6, MRU: 1 };
+  const tb = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
+  const fcfa = (baseAmt) => money(Math.round(baseAmt / (rates.FCFA || 3.6)));
+  const myDevices = (data.devices || []).filter((d) => d.agentId === agent.id && !d.broken);
+  let custDebt = 0, custCollected = 0, custTotal = 0, supCostAll = 0, supUnpaid = 0;
+  myDevices.forEach((d) => {
+    custDebt += tb(d.debt, d.debtCurrency || d.currency || "MRU");
+    custCollected += tb(d.amountPaid, d.currency || "MRU");
+    custTotal += tb(d.totalCustomer, d.currency || "MRU");
+    const c = tb(d.cost, d.costCurrency || "USDT");
+    supCostAll += c;
+    if (!d.costPaid) supUnpaid += c;
+  });
+  const projProfit = custTotal - supCostAll;
+  const projShare = Math.round(projProfit * (Number(agent.percent) || 0)) / 100;
   const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).map((p) => ({ id: p.id, kind: "payout", amount: Number(p.amount) || 0, date: p.date, note: "تسليم نصيب" }));
   const ledger = (bal.ledger || []).map((l) => ({ id: l.id, kind: l.type, amount: Number(l.amount) || 0, date: l.date, note: l.note || "" }));
   const entries = [...ledger, ...payouts].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
@@ -4657,6 +4673,15 @@ function AgentAccountSheet({ agent, data, toBase, onClose, onAddCredit, onWithdr
         <div style={row}><span>💰 نصيبه من أرباحها ({Number(agent.percent) || 0}%)</span><strong>{money(bal.share)} عملة</strong></div>
         <div style={row}><span>➕ رصيد مضاف له</span><strong style={{ color: posCol }}>{money(bal.credits)} عملة</strong></div>
         <div style={row}><span>➖ المدفوع/المسحوب</span><strong style={{ color: negCol }}>{money(bal.payouts + bal.debits)} عملة</strong></div>
+      </div>
+
+      <div style={{ ...box, background: "#0f1830", border: "1px solid #243352" }}>
+        <div style={{ fontWeight: 900, marginBottom: 8, fontSize: 13.5 }}>📊 الوضع المالي لأجهزته ({myDevices.length} جهاز)</div>
+        <div style={{ ...row, marginTop: 0 }}><span>💵 دين زبائنه (المتبقي عليهم)</span><strong className={custDebt > 0 ? "sn-neg" : ""}>{money(custDebt)} عملة</strong></div>
+        <div style={row}><span>💰 المُحصّل من زبائنه فعلاً</span><strong className="sn-pos">{money(custCollected)} عملة</strong></div>
+        <div style={row}><span>🏭 ما علينا للمورّد (غير مدفوع)</span><strong className={supUnpaid > 0 ? "sn-neg" : ""}>{fcfa(supUnpaid)} FCFA</strong></div>
+        <div style={row}><span>🏭 إجمالي تكلفة أجهزته للمورّد</span><strong>{fcfa(supCostAll)} FCFA</strong></div>
+        <div style={{ ...row, borderTop: "1px dashed #2a3550", paddingTop: 8, marginTop: 4 }}><span>🎯 صافيه المتوقّع<br /><span style={{ color: "#8b95ac", fontSize: 11 }}>لو حُصّل كل الدين ودُفع المورّد</span></span><strong className={projShare < 0 ? "sn-neg" : "sn-pos"} style={{ fontSize: 16 }}>{money(projShare)} عملة</strong></div>
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
