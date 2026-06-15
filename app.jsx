@@ -4681,12 +4681,13 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
         <div style={{ color: "#8b95ac", fontSize: 11.5, marginTop: 4 }}>{bal.balance > 0 ? "له هذا المبلغ (تدين له)" : bal.balance < 0 ? "عليه هذا المبلغ (يدين لك)" : "الحساب متوازن"}</div>
       </div>
 
-      <div style={box}>
-        <div style={{ fontWeight: 900, marginBottom: 8, fontSize: 13.5 }}>📊 أجهزته (للاطّلاع)</div>
-        <div style={{ ...row, marginTop: 0 }}><span>📡 عدد أجهزته</span><strong>{devCount}</strong></div>
-        <div style={row}><span>💵 دين زبائنه (عليهم)</span><strong className={custDebt > 0 ? "sn-neg" : ""}>{money(custDebt)} عملة</strong></div>
+      <div style={{ ...box, background: "#0f1830", border: "1px solid #243352" }}>
+        <div style={{ fontWeight: 900, marginBottom: 8, fontSize: 13.5 }}>📊 الوضع المالي لأجهزته ({myDevices.length} جهاز)</div>
+        <div style={{ ...row, marginTop: 0 }}><span>💵 دين زبائنه (المتبقي عليهم)</span><strong className={custDebt > 0 ? "sn-neg" : ""}>{money(custDebt)} عملة</strong></div>
+        <div style={row}><span>💰 المُحصّل من زبائنه فعلاً</span><strong className="sn-pos">{money(custCollected)} عملة</strong></div>
         <div style={row}><span>💰 نصيبه من الأرباح ({Number(agent.percent) || 0}%)</span><strong>{money(bal.share)} عملة</strong></div>
-        <div style={row}><span>🏭 ما علينا للمورّد</span><strong className={supUnpaid > 0 ? "sn-neg" : ""}>{fcfa(supUnpaid)} FCFA</strong></div>
+        <div style={row}><span>🏭 ما علينا للمورّد (غير مدفوع)</span><strong className={supUnpaid > 0 ? "sn-neg" : ""}>{fcfa(supUnpaid)} FCFA</strong></div>
+        <div style={row}><span>🏭 إجمالي تكلفة أجهزته للمورّد</span><strong>{fcfa(supCostAll)} FCFA</strong></div>
       </div>
 
       <div style={box}>
