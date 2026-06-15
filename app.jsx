@@ -1233,6 +1233,19 @@ function StarNetApp() {
     setData((d) => ({ ...d, agentLedger: (d.agentLedger || []).filter((l) => l.id !== id) }));
     flash("حُذف القيد");
   }
+  function resetAgentAccount(agent) {
+    setData((d) => {
+      const rawShare = Math.round(agentProfit(agent.id, d, toBase) * (Number(agent.percent) || 0)) / 100;
+      return {
+        ...d,
+        agents: (d.agents || []).map((a) => (a.id === agent.id ? { ...a, shareBaseline: rawShare } : a)),
+        agentLedger: (d.agentLedger || []).filter((l) => l.agentId !== agent.id),
+        agentPayouts: (d.agentPayouts || []).filter((p) => p.agentId !== agent.id),
+      };
+    });
+    flash("بدأ حساب المندوب من الصفر ✅");
+    playSound("save");
+  }
 
   function addInvItem(info) {
     setData((d) => ({
@@ -1880,6 +1893,7 @@ function StarNetApp() {
           onAddCredit={(amt, note) => addAgentLedger(accountAgent, "credit", amt, note)}
           onWithdraw={(amt, note) => addAgentLedger(accountAgent, "debit", amt, note)}
           onSettle={(amt) => settleAgent(accountAgent, amt)}
+          onReset={() => resetAgentAccount(accountAgent)}
           onDeleteEntry={deleteAgentLedger}
         />
       )}
@@ -4504,13 +4518,15 @@ function agentProfit(agentId, data, toBase) {
 // الحساب الجاري للمندوب: نصيبه من الأرباح + الأرصدة المضافة − (المدفوع + المسحوب)
 function agentBalance(agent, data, toBase) {
   const profit = agentProfit(agent.id, data, toBase);
-  const share = Math.round(profit * (Number(agent.percent) || 0)) / 100;
+  const rawShare = Math.round(profit * (Number(agent.percent) || 0)) / 100;
+  const baseline = Number(agent.shareBaseline) || 0;
+  const share = Math.round((rawShare - baseline) * 100) / 100;
   const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const ledger = (data.agentLedger || []).filter((l) => l.agentId === agent.id);
   const credits = ledger.filter((l) => l.type === "credit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const debits = ledger.filter((l) => l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const balance = Math.round((share + credits - payouts - debits) * 100) / 100;
-  return { profit, share, payouts, credits, debits, balance, ledger };
+  return { profit, rawShare, baseline, share, payouts, credits, debits, balance, ledger };
 }
 
 function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAgent, onSettle, onAccount }) {
@@ -4624,7 +4640,7 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
 }
 
 // شاشة الحساب الجاري للمندوب: رصيد، إضافة، سحب، وكشف حساب
-function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit, onWithdraw, onSettle, onDeleteEntry }) {
+function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit, onWithdraw, onSettle, onReset, onDeleteEntry }) {
   const bal = agentBalance(agent, data, toBase);
   const devCount = (data.devices || []).filter((d) => d.agentId === agent.id).length;
   const grossProfit = agentProfit(agent.id, data, toBase);
@@ -4648,11 +4664,8 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
   const entries = [...ledger, ...payouts].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   const ask = (q, cb) => { const v = window.prompt(q); if (v != null && Number(v) > 0) { const n = window.prompt("ملاحظة (اختياري)") || ""; cb(Number(v), n); } };
   const zero = () => {
-    if (!bal.balance) { return; }
-    const txt = bal.balance > 0 ? `له ${money(bal.balance)}` : `عليه ${money(-bal.balance)}`;
-    if (window.confirm(`تصفير حساب ${agent.name}؟\nالرصيد الحالي: ${txt} عملة.\nسيصبح صفراً ويبدأ من جديد (تبقى الحركة في كشف الحساب).`)) {
-      if (bal.balance > 0) onWithdraw(bal.balance, "تصفير الرصيد — بداية جديدة");
-      else onAddCredit(-bal.balance, "تصفير الرصيد — بداية جديدة");
+    if (window.confirm(`بدء حساب جديد من الصفر لـ ${agent.name}؟\n\nسيصبح الرصيد = 0، و«الرصيد المضاف» = 0، و«المدفوع/المسحوب» = 0.\nأرباح أجهزته الجديدة تتراكم من الآن فصاعداً.`)) {
+      onReset();
     }
   };
   const box = { background: "#111a36", border: "1px solid #243352", borderRadius: 14, padding: 14, marginBottom: 12 };
@@ -4669,27 +4682,24 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
       </div>
 
       <div style={box}>
-        <div style={{ ...row, marginTop: 0 }}><span>📡 ربح أجهزته ({devCount} جهاز)</span><strong className={grossProfit < 0 ? "sn-neg" : ""}>{money(grossProfit)} عملة</strong></div>
-        <div style={row}><span>💰 نصيبه من أرباحها ({Number(agent.percent) || 0}%)</span><strong>{money(bal.share)} عملة</strong></div>
-        <div style={row}><span>➕ رصيد مضاف له</span><strong style={{ color: posCol }}>{money(bal.credits)} عملة</strong></div>
+        <div style={{ fontWeight: 900, marginBottom: 8, fontSize: 13.5 }}>📊 أجهزته (للاطّلاع)</div>
+        <div style={{ ...row, marginTop: 0 }}><span>📡 عدد أجهزته</span><strong>{devCount}</strong></div>
+        <div style={row}><span>💵 دين زبائنه (عليهم)</span><strong className={custDebt > 0 ? "sn-neg" : ""}>{money(custDebt)} عملة</strong></div>
+        <div style={row}><span>💰 نصيبه من الأرباح ({Number(agent.percent) || 0}%)</span><strong>{money(bal.share)} عملة</strong></div>
+        <div style={row}><span>🏭 ما علينا للمورّد</span><strong className={supUnpaid > 0 ? "sn-neg" : ""}>{fcfa(supUnpaid)} FCFA</strong></div>
+      </div>
+
+      <div style={box}>
+        <div style={{ ...row, marginTop: 0 }}><span>➕ الرصيد المضاف له</span><strong style={{ color: posCol }}>{money(bal.credits)} عملة</strong></div>
         <div style={row}><span>➖ المدفوع/المسحوب</span><strong style={{ color: negCol }}>{money(bal.payouts + bal.debits)} عملة</strong></div>
       </div>
 
-      <div style={{ ...box, background: "#0f1830", border: "1px solid #243352" }}>
-        <div style={{ fontWeight: 900, marginBottom: 8, fontSize: 13.5 }}>📊 الوضع المالي لأجهزته ({myDevices.length} جهاز)</div>
-        <div style={{ ...row, marginTop: 0 }}><span>💵 دين زبائنه (المتبقي عليهم)</span><strong className={custDebt > 0 ? "sn-neg" : ""}>{money(custDebt)} عملة</strong></div>
-        <div style={row}><span>💰 المُحصّل من زبائنه فعلاً</span><strong className="sn-pos">{money(custCollected)} عملة</strong></div>
-        <div style={row}><span>🏭 ما علينا للمورّد (غير مدفوع)</span><strong className={supUnpaid > 0 ? "sn-neg" : ""}>{fcfa(supUnpaid)} FCFA</strong></div>
-        <div style={row}><span>🏭 إجمالي تكلفة أجهزته للمورّد</span><strong>{fcfa(supCostAll)} FCFA</strong></div>
-        <div style={{ ...row, borderTop: "1px dashed #2a3550", paddingTop: 8, marginTop: 4 }}><span>🎯 صافيه المتوقّع<br /><span style={{ color: "#8b95ac", fontSize: 11 }}>لو حُصّل كل الدين ودُفع المورّد</span></span><strong className={projShare < 0 ? "sn-neg" : "sn-pos"} style={{ fontSize: 16 }}>{money(projShare)} عملة</strong></div>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         <button onClick={() => ask(`كم تضيف لرصيد ${agent.name}؟`, (v, n) => onAddCredit(v, n))} style={{ flex: 1, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➕ إضافة رصيد له</button>
         <button onClick={() => ask(`كم يسحب/يُسلّم لـ ${agent.name}؟`, (v, n) => onWithdraw(v, n))} style={{ flex: 1, background: "#3a1620", color: "#fca5a5", border: "1px solid #5a2a3a", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➖ سحب / تسليم</button>
       </div>
 
-      <button onClick={zero} style={{ width: "100%", marginBottom: 14, background: "#1e2a4a", color: "#a9c2ff", border: "1px solid #2a3a5e", borderRadius: 12, padding: "11px", fontFamily: "inherit", fontWeight: 800, fontSize: 13.5 }}>🔄 تصفير الرصيد (بداية جديدة)</button>
+      <button onClick={zero} style={{ width: "100%", marginBottom: 14, background: "#3a1620", color: "#fca5a5", border: "1px solid #5a2a3a", borderRadius: 12, padding: "11px", fontFamily: "inherit", fontWeight: 800, fontSize: 13.5 }}>🗑️ بدء حساب جديد من الصفر</button>
 
       <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>📒 كشف الحساب</h3>
       {entries.length === 0 && <p className="sn-hint" style={{ textAlign: "center" }}>لا حركات بعد.</p>}
