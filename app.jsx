@@ -3391,10 +3391,86 @@ function Reports({ data, toBase, settings }) {
 
   return (
     <div className="sn-page">
-      <ProfitStatement data={data} toBase={toBase} />
+      <Collapse title="💰 كشف الأرباح">
+        <ProfitStatement data={data} toBase={toBase} />
+      </Collapse>
 
-      <section className="sn-block">
-        <h2>📈 مقارنة الشهر بالماضي</h2>
+      <Collapse title="📈 الأرباح (اليوم / الشهر / التفصيل)">
+        <section className="sn-profit-grid" style={{ marginBottom: 12 }}>
+          <div className="sn-profit sn-profit--day">
+            <span className="sn-profit-lbl">أرباح اليوم</span>
+            <strong className={agg.dayP < 0 ? "sn-neg" : ""}>{money(agg.dayP)} <em>عملة</em></strong>
+          </div>
+          <div className="sn-profit sn-profit--month">
+            <span className="sn-profit-lbl">أرباح الشهر</span>
+            <strong className={agg.monthP < 0 ? "sn-neg" : ""}>{money(agg.monthP)} <em>عملة</em></strong>
+          </div>
+        </section>
+        <div className="sn-mini-grid">
+          <MiniStat label="مبيعات الشهر" val={`${money(agg.monthRevenue)} عملة`} />
+          <MiniStat label="إجمالي الأرباح" val={`${money(agg.allP)} عملة`} danger={agg.allP < 0} />
+          <MiniStat label="نصيب المندوبين" val={`${money(agg.agentsShare)} عملة`} danger={agg.agentsShare < 0} />
+        </div>
+        <div className="sn-mini-grid sn-mini-grid--2">
+          <MiniStat label="🛒 أرباح المتجر (بيع بدون شحن + اكسسوارات)" val={`${money(agg.storeP)} عملة`} danger={agg.storeP < 0} />
+          <MiniStat label="📡 أرباح أجهزتي (بدون مندوب)" val={`${money(agg.organicChargeP)} عملة`} danger={agg.organicChargeP < 0} />
+        </div>
+        <div className="sn-mini-grid sn-mini-grid--2">
+          <MiniStat label="🤝 أرباح عبر المندوبين" val={`${money(agg.agentChargeP)} عملة`} danger={agg.agentChargeP < 0} />
+          <MiniStat label="📉 أجهزة لم نربح معها" val={`${agg.lossDevices.length}`} danger={agg.lossDevices.length > 0} />
+        </div>
+      </Collapse>
+
+      <Collapse title="📉 الأجهزة التي لم نربح معها" count={agg.lossDevices.length}>
+        {agg.lossDevices.length === 0 ? (
+          <p className="sn-hint" style={{ textAlign: "center" }}>كل أجهزتك المشحونة رابحة 👍</p>
+        ) : (
+          agg.lossDevices.map(({ d, p }) => (
+            <div key={d.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, background: "#111a36", border: "1px solid #243352", borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: 13.5 }}>{d.customerName || "بدون اسم"}{d.accountNumber ? ` (${d.accountNumber})` : ""}</div>
+                <div style={{ color: "#8b95ac", fontSize: 12 }}>{d.agentId ? "عبر مندوب" : "بدون مندوب"}{d.country ? ` • ${d.country}` : ""}</div>
+              </div>
+              <div style={{ fontWeight: 900, fontSize: 13.5, color: p < 0 ? "#fb7185" : "#fbbf24", whiteSpace: "nowrap" }}>{money(Math.round(p))} عملة</div>
+            </div>
+          ))
+        )}
+      </Collapse>
+
+      <Collapse title="💵 كشف الدولار في الشحن">
+        <div className="sn-mini-grid">
+          <MiniStat label="دولار استُعمل في الشحن (الكل)" val={`${money(agg.usdChargeAll)} $`} />
+          <MiniStat label="دولار هذا الشهر" val={`${money(agg.usdChargeMonth)} $`} />
+          <MiniStat label="دولار مستحق لم يُدفع بعد" val={`${money(agg.usdOwed)} $`} danger={agg.usdOwed > 0} />
+        </div>
+        <p className="sn-hint">«دولار استُعمل في الشحن» = ما دفعته فعلاً للمورّد بالدولار. «مستحق لم يُدفع» = أجهزة تسلّفت شحنها ولم تسدّد للمورّد بعد.</p>
+      </Collapse>
+
+      <Collapse title="🧮 إغلاق اليوم وملخص الأسبوع">
+        <div className="sn-close-grid" style={{ marginBottom: 10 }}>
+          <div className="sn-close-c"><span>دخل اليوم</span><strong className="sn-pos">{money(agg.dayIncome)}</strong></div>
+          <div className="sn-close-c"><span>مصروفات اليوم</span><strong className="sn-neg">{money(agg.dayExpense)}</strong></div>
+          <div className="sn-close-c"><span>صافي اليوم</span><strong className={agg.dayP < 0 ? "sn-neg" : "sn-pos"}>{money(agg.dayP)}</strong></div>
+        </div>
+        <div className="sn-close-grid">
+          <div className="sn-close-c"><span>مبيعات ٧ أيام</span><strong>{money(agg.weekSales)}</strong></div>
+          <div className="sn-close-c"><span>أرباح ٧ أيام</span><strong className={agg.weekProfit < 0 ? "sn-neg" : "sn-pos"}>{money(agg.weekProfit)}</strong></div>
+          <div className="sn-close-c"><span>عمليات ٧ أيام</span><strong>{agg.weekCount}</strong></div>
+        </div>
+      </Collapse>
+
+      <Collapse title="🧾 صافي ووضعنا المالي">
+        <div className="sn-mini-grid sn-mini-grid--2">
+          <MiniStat label="صافي ربحي وحدي" val={`${money(agg.myNet)} عملة`} danger={agg.myNet < 0} />
+          <MiniStat label="صافي وضعنا (بعد المورّد)" val={`${money(agg.allP - agg.supplierUnpaid)} عملة`} danger={agg.allP - agg.supplierUnpaid < 0} />
+        </div>
+        <div className="sn-mini-grid sn-mini-grid--2">
+          <MiniStat label="دين العملاء لنا (إجمالي)" val={`${money(agg.debt)} عملة`} danger={agg.debt > 0} />
+          <MiniStat label="دين علينا للمورّد (إجمالي)" val={`${money(agg.supplierUnpaid)} عملة`} danger={agg.supplierUnpaid > 0} />
+        </div>
+      </Collapse>
+
+      <Collapse title="📈 مقارنة الشهر بالماضي">
         <div className="sn-cmp-grid">
           <div className="sn-cmp">
             <span>المبيعات</span>
@@ -3408,11 +3484,10 @@ function Reports({ data, toBase, settings }) {
           </div>
         </div>
         <p className="sn-hint">مقارنةً بالشهر الماضي (مبيعاته {money(extra.lastSales)} • أرباحه {money(extra.lastProfit)} عملة).</p>
-      </section>
+      </Collapse>
 
       {extra.topCustomers.length > 0 && (
-        <section className="sn-block">
-          <h2>📊 أفضل الزبائن (بالربح)</h2>
+        <Collapse title="📊 أفضل الزبائن (بالربح)">
           {extra.topCustomers.map((c, i) => (
             <div className="sn-rank-row" key={c.n}>
               <span className="sn-rank-no">{i + 1}</span>
@@ -3420,24 +3495,22 @@ function Reports({ data, toBase, settings }) {
               <span className={"sn-rank-val " + (c.v < 0 ? "sn-neg" : "sn-pos")}>{c.v >= 0 ? "+" : ""}{money(c.v)} عملة</span>
             </div>
           ))}
-        </section>
+        </Collapse>
       )}
 
       {extra.countries.length > 0 && (
-        <section className="sn-block">
-          <h2>🌍 إحصاء حسب الدولة</h2>
+        <Collapse title="🌍 إحصاء حسب الدولة">
           {extra.countries.map((c) => (
             <div className="sn-rank-row" key={c.n}>
               <span className="sn-rank-name">{c.n}</span>
               <span className="sn-rank-val">{c.count} جهاز{c.cost ? ` • تكلفة ${c.cost}$` : ""}</span>
             </div>
           ))}
-        </section>
+        </Collapse>
       )}
 
       {extra.referrals.length > 0 && (
-        <section className="sn-block">
-          <h2>🧑‍🤝‍🧑 الإحالات (من جلب زبائن)</h2>
+        <Collapse title="🧑‍🤝‍🧑 الإحالات (من جلب زبائن)">
           {extra.referrals.map((r, i) => (
             <div className="sn-rank-row" key={r.n}>
               <span className="sn-rank-no">{i + 1}</span>
@@ -3446,142 +3519,10 @@ function Reports({ data, toBase, settings }) {
             </div>
           ))}
           <p className="sn-hint">فكرة: امنح من يجلب أكثر زبائن خصماً أو مكافأة. 🎁</p>
-        </section>
+        </Collapse>
       )}
 
-      {extra.byCurArr.length > 0 && (
-        <section className="sn-block">
-          <h2>💵 الحركة حسب العملة (غير مدمجة)</h2>
-          {extra.byCurArr.map((c) => (
-            <div className="sn-rank-row" key={c.cur}>
-              <span className="sn-rank-name">{symbolOf(c.cur)} {c.cur}</span>
-              <span className="sn-rank-val">
-                <span className="sn-pos">+{money(c.inc)}</span>
-                {c.out > 0 ? <> · <span className="sn-neg">−{money(c.out)}</span></> : null}
-                {" "}· صافي {money(c.net)}
-              </span>
-            </div>
-          ))}
-          <p className="sn-hint">المبالغ بكل عملة على حدة كما دخلت/خرجت فعلياً (دون تحويلها للأوقية).</p>
-        </section>
-      )}
-
-      <section className="sn-profit-grid">
-        <div className="sn-profit sn-profit--day">
-          <span className="sn-profit-lbl">أرباح اليوم</span>
-          <strong className={agg.dayP < 0 ? "sn-neg" : ""}>{money(agg.dayP)} <em>عملة</em></strong>
-        </div>
-        <div className="sn-profit sn-profit--month">
-          <span className="sn-profit-lbl">أرباح الشهر</span>
-          <strong className={agg.monthP < 0 ? "sn-neg" : ""}>{money(agg.monthP)} <em>عملة</em></strong>
-        </div>
-      </section>
-
-      <div className="sn-mini-grid">
-        <MiniStat label="مبيعات الشهر" val={`${money(agg.monthRevenue)} عملة`} />
-        <MiniStat label="إجمالي الأرباح" val={`${money(agg.allP)} عملة`} danger={agg.allP < 0} />
-        <MiniStat label="نصيب المندوبين" val={`${money(agg.agentsShare)} عملة`} danger={agg.agentsShare < 0} />
-      </div>
-
-      <div className="sn-mini-grid sn-mini-grid--2">
-        <MiniStat label="🛒 أرباح المتجر (بيع بدون شحن + اكسسوارات)" val={`${money(agg.storeP)} عملة`} danger={agg.storeP < 0} />
-        <MiniStat label="📡 أرباح أجهزتي (بدون مندوب)" val={`${money(agg.organicChargeP)} عملة`} danger={agg.organicChargeP < 0} />
-      </div>
-      <div className="sn-mini-grid sn-mini-grid--2">
-        <MiniStat label="🤝 أرباح عبر المندوبين" val={`${money(agg.agentChargeP)} عملة`} danger={agg.agentChargeP < 0} />
-        <MiniStat label="📉 أجهزة لم نربح معها" val={`${agg.lossDevices.length}`} danger={agg.lossDevices.length > 0} />
-      </div>
-
-      <section className="sn-block">
-        <button onClick={() => setShowLoss((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "transparent", border: "none", color: "#e7ecf6", fontFamily: "inherit", fontWeight: 800, fontSize: 15, padding: 0, cursor: "pointer" }}>
-          <span>📉 الأجهزة التي لم نربح معها ({agg.lossDevices.length}){agg.lossTotal < 0 ? ` — خسارة ${money(Math.round(-agg.lossTotal))} عملة` : ""}</span>
-          <span>{showLoss ? "▾" : "◂"}</span>
-        </button>
-        {showLoss && (
-          <div style={{ marginTop: 10 }}>
-            {agg.lossDevices.length === 0 ? (
-              <p className="sn-hint" style={{ textAlign: "center" }}>كل أجهزتك المشحونة رابحة 👍</p>
-            ) : (
-              agg.lossDevices.map(({ d, p }) => (
-                <div key={d.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, background: "#111a36", border: "1px solid #243352", borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, fontSize: 13.5 }}>{d.customerName || "بدون اسم"}{d.accountNumber ? ` (${d.accountNumber})` : ""}</div>
-                    <div style={{ color: "#8b95ac", fontSize: 12 }}>{d.agentId ? "عبر مندوب" : "بدون مندوب"}{d.country ? ` • ${d.country}` : ""}</div>
-                  </div>
-                  <div style={{ fontWeight: 900, fontSize: 13.5, color: p < 0 ? "#fb7185" : "#fbbf24", whiteSpace: "nowrap" }}>{money(Math.round(p))} عملة</div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-      </section>
-
-      <section className="sn-block">
-        <h2>💵 كشف الدولار في الشحن</h2>
-        <div className="sn-mini-grid">
-          <MiniStat label="دولار استُعمل في الشحن (الكل)" val={`${money(agg.usdChargeAll)} $`} />
-          <MiniStat label="دولار هذا الشهر" val={`${money(agg.usdChargeMonth)} $`} />
-          <MiniStat label="دولار مستحق لم يُدفع بعد" val={`${money(agg.usdOwed)} $`} danger={agg.usdOwed > 0} />
-        </div>
-        <p className="sn-hint">«دولار استُعمل في الشحن» = ما دفعته فعلاً للمورّد بالدولار. «مستحق لم يُدفع» = أجهزة تسلّفت شحنها ولم تسدّد للمورّد بعد.</p>
-      </section>
-
-      <section className="sn-close">
-        <div className="sn-close-h">🧮 إغلاق اليوم</div>
-        <div className="sn-close-grid">
-          <div className="sn-close-c"><span>دخل اليوم</span><strong className="sn-pos">{money(agg.dayIncome)}</strong></div>
-          <div className="sn-close-c"><span>مصروفات اليوم</span><strong className="sn-neg">{money(agg.dayExpense)}</strong></div>
-          <div className="sn-close-c"><span>صافي اليوم</span><strong className={agg.dayP < 0 ? "sn-neg" : "sn-pos"}>{money(agg.dayP)}</strong></div>
-        </div>
-      </section>
-
-      <section className="sn-close">
-        <div className="sn-close-h">📅 ملخّص آخر ٧ أيام</div>
-        <div className="sn-close-grid">
-          <div className="sn-close-c"><span>المبيعات</span><strong>{money(agg.weekSales)}</strong></div>
-          <div className="sn-close-c"><span>الأرباح</span><strong className={agg.weekProfit < 0 ? "sn-neg" : "sn-pos"}>{money(agg.weekProfit)}</strong></div>
-          <div className="sn-close-c"><span>عمليات</span><strong>{agg.weekCount}</strong></div>
-        </div>
-      </section>
-
-      <section className="sn-block">
-        <button onClick={() => setShowCal((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "transparent", border: "none", color: "#e7ecf6", fontFamily: "inherit", fontWeight: 800, fontSize: 15, padding: 0, cursor: "pointer" }}>
-          <span>🗓️ تقويم التجديدات الكامل</span>
-          <span>{showCal ? "▾" : "◂"}</span>
-        </button>
-        {showCal && <div style={{ marginTop: 10 }}><CalendarPanel data={data} /></div>}
-      </section>
-
-      <div className="sn-mini-grid sn-mini-grid--2">
-        <MiniStat label="صافي ربحي وحدي" val={`${money(agg.myNet)} عملة`} danger={agg.myNet < 0} />
-        <MiniStat label="صافي وضعنا (بعد المورّد)" val={`${money(agg.allP - agg.supplierUnpaid)} عملة`} danger={agg.allP - agg.supplierUnpaid < 0} />
-      </div>
-
-      <div className="sn-mini-grid sn-mini-grid--2">
-        <MiniStat label="دين العملاء لنا (إجمالي)" val={`${money(agg.debt)} عملة`} danger={agg.debt > 0} />
-        <MiniStat label="دين علينا للمورّد (إجمالي)" val={`${money(agg.supplierUnpaid)} عملة`} danger={agg.supplierUnpaid > 0} />
-      </div>
-
-      <section className="sn-block">
-        <h2>أرباح آخر 7 أيام</h2>
-        <div className="sn-chart">
-          {week.map((d, i) => (
-            <div className="sn-bar-col" key={i}>
-              <div className="sn-bar-wrap">
-                <div
-                  className="sn-bar"
-                  style={{ height: `${Math.max(4, (d.profit / maxP) * 100)}%` }}
-                  title={`${money(d.profit)} عملة`}
-                />
-              </div>
-              <span className="sn-bar-lbl">{parseDate(d.date).getDate()}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="sn-block">
-        <h2>مبيعات الشهر حسب العملة</h2>
+      <Collapse title="💱 مبيعات الشهر حسب العملة">
         {Object.keys(agg.byCur).length === 0 ? (
           <p className="sn-muted-txt">لا توجد معاملات هذا الشهر.</p>
         ) : (
@@ -3592,16 +3533,10 @@ function Reports({ data, toBase, settings }) {
             </div>
           ))
         )}
-      </section>
+      </Collapse>
 
-      <section className="sn-block">
-        <div className="sn-sec-head" onClick={() => setShowEmails((s) => !s)} style={{ cursor: "pointer" }}>
-          <h2>الإيميلات {showEmails ? "▾" : "▸"}</h2>
-          <span className="sn-count">{emails.length}</span>
-        </div>
-        {!showEmails ? (
-          <p className="sn-muted-txt">اضغط لعرض كل الإيميلات.</p>
-        ) : emails.length === 0 ? (
+      <Collapse title="📧 الإيميلات" count={emails.length}>
+        {emails.length === 0 ? (
           <p className="sn-muted-txt">لا توجد إيميلات بعد.</p>
         ) : (
           emails.map(([e, n]) => (
@@ -3611,10 +3546,9 @@ function Reports({ data, toBase, settings }) {
             </div>
           ))
         )}
-      </section>
+      </Collapse>
 
-      <section className="sn-block">
-        <h2>المعاملات حسب الزبون</h2>
+      <Collapse title="🧾 المعاملات حسب الزبون">
         {grouped.length === 0 ? (
           <p className="sn-muted-txt">لا توجد معاملات بعد.</p>
         ) : (
@@ -3638,8 +3572,21 @@ function Reports({ data, toBase, settings }) {
             );
           })
         )}
-      </section>
+      </Collapse>
     </div>
+  );
+}
+
+function Collapse({ title, count, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="sn-block">
+      <button onClick={() => setOpen((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, background: "transparent", border: "none", color: "#e7ecf6", fontFamily: "inherit", fontWeight: 800, fontSize: 15, padding: 0, cursor: "pointer", textAlign: "right" }}>
+        <span>{title}{count != null ? ` (${count})` : ""}</span>
+        <span style={{ color: "#8b95ac", fontSize: 18 }}>{open ? "▾" : "◂"}</span>
+      </button>
+      {open && <div style={{ marginTop: 12 }}>{children}</div>}
+    </section>
   );
 }
 
@@ -4610,7 +4557,7 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
                 <MiniStat label="ربحي معهم اليوم" val={`${money(Math.round(rep.profitDay))} عملة`} danger={rep.profitDay < 0} />
               </div>
               <div className="sn-mini-grid">
-                <MiniStat label="أجهزة المندوبين الخاسرة" val={`${rep.lossCount}${rep.lossTotal < 0 ? ` — خسارة ${money(Math.round(-rep.lossTotal))}` : ""}`} danger={rep.lossCount > 0} />
+                <MiniStat label="أجهزة المندوبين الخاسرة" val={String(rep.lossCount) + (rep.lossTotal < 0 ? ` — خسارة ${money(Math.round(-rep.lossTotal))}` : "")} danger={rep.lossCount > 0} />
               </div>
             </div>
           )}
@@ -4651,7 +4598,7 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
               <div className="sn-agent-figs">
                 <span className={profit < 0 ? "sn-neg" : "sn-pos"}>💰 ربحي معه: {money(profit)} عملة</span>
                 {lossCount > 0 && <span className="sn-neg">📉 خسائري معه: {money(Math.round(-agentLoss))} عملة ({lossCount} جهاز)</span>}
-                <span className={bal.balance > 0 ? "sn-neg" : "sn-pos"}>🧾 الرصيد: {bal.balance > 0 ? `له ${money(bal.balance)}` : bal.balance < 0 ? `عليه ${money(-bal.balance)}` : "مُسوّى ✓"} عملة</span>
+                <span className={bal.balance < 0 ? "sn-neg" : "sn-pos"}>🧾 الرصيد: {bal.balance > 0 ? `له ${money(bal.balance)}` : bal.balance < 0 ? `عليه ${money(-bal.balance)}` : "مُسوّى ✓"} عملة</span>
               </div>
               <div className="sn-card-actions">
                 <button className="sn-mini sn-mini--green" onClick={() => onAccount(a)}>
@@ -4678,25 +4625,36 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
 // شاشة الحساب الجاري للمندوب: رصيد، إضافة، سحب، وكشف حساب
 function AgentAccountSheet({ agent, data, toBase, onClose, onAddCredit, onWithdraw, onSettle, onDeleteEntry }) {
   const bal = agentBalance(agent, data, toBase);
+  const devCount = (data.devices || []).filter((d) => d.agentId === agent.id).length;
+  const grossProfit = agentProfit(agent.id, data, toBase);
   const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).map((p) => ({ id: p.id, kind: "payout", amount: Number(p.amount) || 0, date: p.date, note: "تسليم نصيب" }));
   const ledger = (bal.ledger || []).map((l) => ({ id: l.id, kind: l.type, amount: Number(l.amount) || 0, date: l.date, note: l.note || "" }));
   const entries = [...ledger, ...payouts].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   const ask = (q, cb) => { const v = window.prompt(q); if (v != null && Number(v) > 0) { const n = window.prompt("ملاحظة (اختياري)") || ""; cb(Number(v), n); } };
+  const zero = () => {
+    if (!bal.balance) { return; }
+    const txt = bal.balance > 0 ? `له ${money(bal.balance)}` : `عليه ${money(-bal.balance)}`;
+    if (window.confirm(`تصفير حساب ${agent.name}؟\nالرصيد الحالي: ${txt} عملة.\nسيصبح صفراً ويبدأ من جديد (تبقى الحركة في كشف الحساب).`)) {
+      if (bal.balance > 0) onWithdraw(bal.balance, "تصفير الرصيد — بداية جديدة");
+      else onAddCredit(-bal.balance, "تصفير الرصيد — بداية جديدة");
+    }
+  };
   const box = { background: "#111a36", border: "1px solid #243352", borderRadius: 14, padding: 14, marginBottom: 12 };
   const row = { display: "flex", justifyContent: "space-between", fontSize: 13.5, marginTop: 6 };
   const posCol = "#34d399", negCol = "#fb7185";
   return (
     <Sheet title={`💼 حساب ${agent.name}`} onClose={onClose}>
-      <div style={{ ...box, textAlign: "center", background: bal.balance > 0 ? "rgba(251,113,133,.12)" : "rgba(52,211,153,.10)", border: "1px solid " + (bal.balance > 0 ? "#5a2a3a" : "#1f5a33") }}>
+      <div style={{ ...box, textAlign: "center", background: bal.balance < 0 ? "rgba(251,113,133,.12)" : "rgba(52,211,153,.10)", border: "1px solid " + (bal.balance < 0 ? "#5a2a3a" : "#1f5a33") }}>
         <div style={{ color: "#8b95ac", fontSize: 12 }}>الرصيد الحالي</div>
-        <div style={{ fontSize: 26, fontWeight: 900, color: bal.balance > 0 ? negCol : posCol }}>
+        <div style={{ fontSize: 26, fontWeight: 900, color: bal.balance < 0 ? negCol : posCol }}>
           {bal.balance > 0 ? `له ${money(bal.balance)}` : bal.balance < 0 ? `عليه ${money(-bal.balance)}` : "مُسوّى ✓"} <span style={{ fontSize: 13 }}>عملة</span>
         </div>
-        <div style={{ color: "#8b95ac", fontSize: 11.5, marginTop: 4 }}>{bal.balance > 0 ? "أنت تدين له بهذا المبلغ" : bal.balance < 0 ? "هو يدين لك بهذا المبلغ" : "الحساب متوازن"}</div>
+        <div style={{ color: "#8b95ac", fontSize: 11.5, marginTop: 4 }}>{bal.balance > 0 ? "له هذا المبلغ (تدين له)" : bal.balance < 0 ? "عليه هذا المبلغ (يدين لك)" : "الحساب متوازن"}</div>
       </div>
 
       <div style={box}>
-        <div style={{ ...row, marginTop: 0 }}><span>💰 نصيبه من أرباح الأجهزة</span><strong>{money(bal.share)} عملة</strong></div>
+        <div style={{ ...row, marginTop: 0 }}><span>📡 ربح أجهزته ({devCount} جهاز)</span><strong className={grossProfit < 0 ? "sn-neg" : ""}>{money(grossProfit)} عملة</strong></div>
+        <div style={row}><span>💰 نصيبه من أرباحها ({Number(agent.percent) || 0}%)</span><strong>{money(bal.share)} عملة</strong></div>
         <div style={row}><span>➕ رصيد مضاف له</span><strong style={{ color: posCol }}>{money(bal.credits)} عملة</strong></div>
         <div style={row}><span>➖ المدفوع/المسحوب</span><strong style={{ color: negCol }}>{money(bal.payouts + bal.debits)} عملة</strong></div>
       </div>
@@ -4705,6 +4663,8 @@ function AgentAccountSheet({ agent, data, toBase, onClose, onAddCredit, onWithdr
         <button onClick={() => ask(`كم تضيف لرصيد ${agent.name}؟`, (v, n) => onAddCredit(v, n))} style={{ flex: 1, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➕ إضافة رصيد له</button>
         <button onClick={() => ask(`كم يسحب/يُسلّم لـ ${agent.name}؟`, (v, n) => onWithdraw(v, n))} style={{ flex: 1, background: "#3a1620", color: "#fca5a5", border: "1px solid #5a2a3a", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➖ سحب / تسليم</button>
       </div>
+
+      <button onClick={zero} style={{ width: "100%", marginBottom: 14, background: "#1e2a4a", color: "#a9c2ff", border: "1px solid #2a3a5e", borderRadius: 12, padding: "11px", fontFamily: "inherit", fontWeight: 800, fontSize: 13.5 }}>🔄 تصفير الرصيد (بداية جديدة)</button>
 
       <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>📒 كشف الحساب</h3>
       {entries.length === 0 && <p className="sn-hint" style={{ textAlign: "center" }}>لا حركات بعد.</p>}
