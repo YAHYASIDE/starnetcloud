@@ -1710,6 +1710,7 @@ function StarNetApp() {
           <Agents
             data={data}
             toBase={toBase}
+            settings={settings}
             onAddAgent={() => setEditingAgent("new")}
             onEditAgent={setEditingAgent}
             onDeleteAgent={deleteAgent}
@@ -2123,6 +2124,95 @@ ${devCards || "<p>لا أجهزة</p>"}
   } catch (e) {
     return false;
   }
+}
+
+// كشف حساب المندوب PDF — كله بـ FCFA
+function exportAgentPDF(agent, data, settings) {
+  const rates = (settings && settings.rates) || { USDT: 430, FCFA: 3.6, MRU: 1 };
+  const tb = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
+  const toF = (b) => Math.round(b / (rates.FCFA || 3.6));
+  const f = (b) => money(toF(b));
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const devs = (data.devices || []).filter((d) => d.agentId === agent.id && !d.broken);
+  const percent = Number(agent.percent) || 0;
+  let custDebt = 0, custTotal = 0, custCollected = 0, supCostAll = 0, supPaid = 0, supUnpaid = 0;
+  devs.forEach((d) => {
+    custDebt += tb(d.debt, d.debtCurrency || d.currency || "MRU");
+    custTotal += tb(d.totalCustomer, d.currency || "MRU");
+    custCollected += tb(d.amountPaid, d.currency || "MRU");
+    const c = tb(d.cost, d.costCurrency || "USDT");
+    supCostAll += c;
+    if (d.costPaid) supPaid += c; else supUnpaid += c;
+  });
+  const combinedFull = custTotal - supCostAll;
+  const myNetFull = combinedFull * (1 - percent / 100);
+  const agentNetFull = combinedFull * (percent / 100);
+  const realized = custCollected - supPaid;
+  const agentNetNow = realized * (percent / 100);
+  const paidByAgent = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0) + (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const liab = toF(custDebt);
+  const remaining = liab - paidByAgent;
+  const custRows = devs.map((d) => `<tr><td>${esc(d.customerName || "—")}</td><td>${esc(d.accountNumber || "—")}</td><td class="ltr">${f(tb(d.debt, d.debtCurrency || d.currency || "MRU"))}</td></tr>`).join("");
+  const html = `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>كشف المندوب ${esc(agent.name)} — ${esc(settings.businessName)}</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;800&display=swap');
+*{box-sizing:border-box;font-family:'Tajawal',Tahoma,sans-serif}
+body{margin:0;padding:20px;color:#111;background:#fff}
+h1{font-size:22px;margin:0 0 2px}
+.sub{color:#666;font-size:13px;margin-bottom:16px}
+h2{font-size:16px;margin:18px 0 8px}
+.bal{font-weight:800;font-size:18px;border-radius:10px;padding:14px;margin-bottom:16px;border:1px solid #dde3ef;text-align:center}
+.bal-d{color:#b91c1c;background:#fef2f2;border-color:#fecaca}
+.bal-c{color:#047857;background:#ecfdf5;border-color:#a7f3d0}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:14px}
+td,th{padding:8px;border:1px solid #e5e9f2;text-align:right}
+th{background:#f4f6fb}
+.k{color:#555;width:62%}
+.v{font-weight:800;direction:ltr;text-align:left}
+.ltr{direction:ltr;text-align:left;font-weight:700}
+.pos{color:#047857}.neg{color:#b91c1c}
+.btn{position:fixed;top:12px;left:12px;background:#2563eb;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:14px;font-family:inherit;cursor:pointer}
+@media print{.btn{display:none}body{padding:0}}
+</style></head><body>
+<button class="btn" onclick="window.print()">🖨️ حفظ PDF / طباعة</button>
+<h1>كشف حساب المندوب: ${esc(agent.name)}</h1>
+<div class="sub">${esc(settings.businessName)} ⭐ — ${fmtDate(todayStr())} — النسبة ${percent}% — كل المبالغ بـ FCFA</div>
+<div class="bal ${remaining > 0 ? "bal-d" : remaining < 0 ? "bal-c" : ""}">${remaining > 0 ? "المتبقّي على المندوب: " + money(remaining) + " FCFA" : remaining < 0 ? "له (دفع زيادة): " + money(-remaining) + " FCFA" : "الحساب مُسوّى ✓"}</div>
+<h2>حسابه معي</h2>
+<table>
+<tr><td class="k">📌 إجمالي ما عليه (ديون زبائنه)</td><td class="v">${money(liab)} FCFA</td></tr>
+<tr><td class="k">💰 ما دفعه لي</td><td class="v pos">${money(paidByAgent)} FCFA</td></tr>
+<tr><td class="k">🔻 المتبقّي عليه</td><td class="v ${remaining > 0 ? "neg" : "pos"}">${money(remaining)} FCFA</td></tr>
+</table>
+<h2>أرباح أجهزته</h2>
+<table>
+<tr><td class="k">🤝 ربحنا معاً (لو دُفع كل شيء)</td><td class="v">${f(combinedFull)} FCFA</td></tr>
+<tr><td class="k">🟢 صافي ربحي أنا (بعد دفع الطرفين)</td><td class="v">${f(myNetFull)} FCFA</td></tr>
+<tr><td class="k">🟢 صافي ربح المندوب (بعد دفع الطرفين)</td><td class="v">${f(agentNetFull)} FCFA</td></tr>
+<tr><td class="k">⏳ صافي ربح المندوب حالياً (المُحصّل فعلاً)</td><td class="v">${f(agentNetNow)} FCFA</td></tr>
+</table>
+<h2>المورّد (دفع لكل جهاز وحده)</h2>
+<table>
+<tr><td class="k">🏭 ديون المورّد علينا (غير مدفوع)</td><td class="v neg">${f(supUnpaid)} FCFA</td></tr>
+<tr><td class="k">💲 ما دفعناه للمورّد</td><td class="v">${f(supPaid)} FCFA</td></tr>
+</table>
+<h2>ديون زبائنه (${devs.length})</h2>
+<table><tr><th>الزبون</th><th>رقم الحساب</th><th>الدين (FCFA)</th></tr>${custRows || "<tr><td colspan=3>لا أجهزة</td></tr>"}</table>
+<script>setTimeout(function(){try{window.print()}catch(e){}},600)</script>
+</body></html>`;
+  try {
+    const w = window.open("", "_blank");
+    if (w) { w.document.open(); w.document.write(html); w.document.close(); return true; }
+  } catch (e) { /* fallback */ }
+  try {
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `كشف-المندوب-${agent.name || ""}.html`; a.click();
+    URL.revokeObjectURL(url); return true;
+  } catch (e) { return false; }
 }
 
 // تصدير بطاقة الزبون كصورة PNG جاهزة للإرسال عبر واتساب
@@ -4529,7 +4619,18 @@ function agentBalance(agent, data, toBase) {
   return { profit, rawShare, baseline, share, payouts, credits, debits, balance, ledger };
 }
 
-function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAgent, onSettle, onAccount }) {
+function agentRemaining(agent, data, rates) {
+  const tb = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
+  let custDebt = 0;
+  (data.devices || []).forEach((d) => { if (d.agentId === agent.id && !d.broken) custDebt += tb(d.debt, d.debtCurrency || d.currency || "MRU"); });
+  const liab = Math.round(custDebt / (rates.FCFA || 3.6));
+  const credits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "credit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const debits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  return (liab + credits) - (payouts + debits);
+}
+
+function Agents({ data, toBase, settings, onAddAgent, onEditAgent, onDeleteAgent, onViewAgent, onSettle, onAccount }) {
   const agents = data.agents || [];
   const payouts = data.agentPayouts || [];
   const [showRep, setShowRep] = useState(false);
@@ -4597,6 +4698,7 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
           const agentLoss = myDevs.reduce((s, d) => s + Math.min(0, devProfit[d.id] || 0), 0);
           const lossCount = myDevs.filter((d) => (d.id in devProfit) && devProfit[d.id] <= 0).length;
           const bal = agentBalance(a, data, toBase);
+          const rem = agentRemaining(a, data, (settings && settings.rates) || { USDT: 430, FCFA: 3.6, MRU: 1 });
           return (
             <div className="sn-agent-card" key={a.id}>
               <div className="sn-agent-top">
@@ -4615,7 +4717,7 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
               <div className="sn-agent-figs">
                 <span className={profit < 0 ? "sn-neg" : "sn-pos"}>💰 ربحي معه: {money(profit)} عملة</span>
                 {lossCount > 0 && <span className="sn-neg">📉 خسائري معه: {money(Math.round(-agentLoss))} عملة ({lossCount} جهاز)</span>}
-                <span className={bal.balance < 0 ? "sn-neg" : "sn-pos"}>🧾 الرصيد: {bal.balance > 0 ? `له ${money(bal.balance)}` : bal.balance < 0 ? `عليه ${money(-bal.balance)}` : "مُسوّى ✓"} عملة</span>
+                <span className={rem > 0 ? "sn-neg" : "sn-pos"}>🧾 المتبقّي: {rem > 0 ? `عليه ${money(rem)}` : rem < 0 ? `له ${money(-rem)}` : "مُسوّى ✓"} FCFA</span>
               </div>
               <div className="sn-card-actions">
                 <button className="sn-mini sn-mini--green" onClick={() => onAccount(a)}>
@@ -4641,79 +4743,105 @@ function Agents({ data, toBase, onAddAgent, onEditAgent, onDeleteAgent, onViewAg
 
 // شاشة الحساب الجاري للمندوب: رصيد، إضافة، سحب، وكشف حساب
 function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit, onWithdraw, onSettle, onReset, onDeleteEntry }) {
-  const bal = agentBalance(agent, data, toBase);
-  const devCount = (data.devices || []).filter((d) => d.agentId === agent.id).length;
-  const grossProfit = agentProfit(agent.id, data, toBase);
   const rates = (settings && settings.rates) || { USDT: 430, FCFA: 3.6, MRU: 1 };
   const tb = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
-  const fcfa = (baseAmt) => money(Math.round(baseAmt / (rates.FCFA || 3.6)));
+  const toF = (b) => Math.round(b / (rates.FCFA || 3.6));
+  const f = (b) => money(toF(b));
   const myDevices = (data.devices || []).filter((d) => d.agentId === agent.id && !d.broken);
-  let custDebt = 0, custCollected = 0, custTotal = 0, supCostAll = 0, supUnpaid = 0;
+  const percent = Number(agent.percent) || 0;
+  let custDebt = 0, custTotal = 0, custCollected = 0, supCostAll = 0, supPaid = 0, supUnpaid = 0;
   myDevices.forEach((d) => {
     custDebt += tb(d.debt, d.debtCurrency || d.currency || "MRU");
-    custCollected += tb(d.amountPaid, d.currency || "MRU");
     custTotal += tb(d.totalCustomer, d.currency || "MRU");
+    custCollected += tb(d.amountPaid, d.currency || "MRU");
     const c = tb(d.cost, d.costCurrency || "USDT");
     supCostAll += c;
-    if (!d.costPaid) supUnpaid += c;
+    if (d.costPaid) supPaid += c; else supUnpaid += c;
   });
-  const projProfit = custTotal - supCostAll;
-  const projShare = Math.round(projProfit * (Number(agent.percent) || 0)) / 100;
-  const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).map((p) => ({ id: p.id, kind: "payout", amount: Number(p.amount) || 0, date: p.date, note: "تسليم نصيب" }));
-  const ledger = (bal.ledger || []).map((l) => ({ id: l.id, kind: l.type, amount: Number(l.amount) || 0, date: l.date, note: l.note || "" }));
-  const entries = [...ledger, ...payouts].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const combinedFull = custTotal - supCostAll;
+  const myNetFull = combinedFull * (1 - percent / 100);
+  const agentNetFull = combinedFull * (percent / 100);
+  const realized = custCollected - supPaid;
+  const agentNetNow = realized * (percent / 100);
+  const credits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "credit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const debits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const liab = toF(custDebt) + credits;
+  const paidByAgent = payouts + debits;
+  const remaining = liab - paidByAgent;
+  const payments = [
+    ...(data.agentPayouts || []).filter((p) => p.agentId === agent.id).map((p) => ({ id: p.id, kind: "payout", amount: Number(p.amount) || 0, date: p.date, note: "تسليم" })),
+    ...(data.agentLedger || []).filter((l) => l.agentId === agent.id).map((l) => ({ id: l.id, kind: l.type, amount: Number(l.amount) || 0, date: l.date, note: l.note || "" })),
+  ].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   const ask = (q, cb) => { const v = window.prompt(q); if (v != null && Number(v) > 0) { const n = window.prompt("ملاحظة (اختياري)") || ""; cb(Number(v), n); } };
-  const zero = () => {
-    if (window.confirm(`بدء حساب جديد من الصفر لـ ${agent.name}؟\n\nسيصبح الرصيد = 0، و«الرصيد المضاف» = 0، و«المدفوع/المسحوب» = 0.\nأرباح أجهزته الجديدة تتراكم من الآن فصاعداً.`)) {
-      onReset();
-    }
-  };
+  const reset = () => { if (window.confirm(`بدء حساب جديد من الصفر لـ ${agent.name}؟\n\nستُمسح كل الدفعات المسجّلة (يصبح «ما دفعه لي» = 0).\nأرقام أجهزته وأرباحه تبقى محسوبة تلقائياً.`)) onReset(); };
   const box = { background: "#111a36", border: "1px solid #243352", borderRadius: 14, padding: 14, marginBottom: 12 };
-  const row = { display: "flex", justifyContent: "space-between", fontSize: 13.5, marginTop: 6 };
+  const row = { display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13.5, marginTop: 6 };
+  const head = { fontWeight: 900, marginBottom: 8, fontSize: 13.5 };
   const posCol = "#34d399", negCol = "#fb7185";
   return (
     <Sheet title={`💼 حساب ${agent.name}`} onClose={onClose}>
-      <div style={{ ...box, textAlign: "center", background: bal.balance < 0 ? "rgba(251,113,133,.12)" : "rgba(52,211,153,.10)", border: "1px solid " + (bal.balance < 0 ? "#5a2a3a" : "#1f5a33") }}>
-        <div style={{ color: "#8b95ac", fontSize: 12 }}>الرصيد الحالي</div>
-        <div style={{ fontSize: 26, fontWeight: 900, color: bal.balance < 0 ? negCol : posCol }}>
-          {bal.balance > 0 ? `له ${money(bal.balance)}` : bal.balance < 0 ? `عليه ${money(-bal.balance)}` : "مُسوّى ✓"} <span style={{ fontSize: 13 }}>عملة</span>
+      <div style={{ ...box, textAlign: "center", background: remaining > 0 ? "rgba(251,113,133,.12)" : "rgba(52,211,153,.10)", border: "1px solid " + (remaining > 0 ? "#5a2a3a" : "#1f5a33") }}>
+        <div style={{ color: "#8b95ac", fontSize: 12 }}>المتبقّي على المندوب</div>
+        <div style={{ fontSize: 26, fontWeight: 900, color: remaining > 0 ? negCol : posCol }}>
+          {remaining > 0 ? `عليه ${money(remaining)}` : remaining < 0 ? `له ${money(-remaining)}` : "مُسوّى ✓"} <span style={{ fontSize: 13 }}>FCFA</span>
         </div>
-        <div style={{ color: "#8b95ac", fontSize: 11.5, marginTop: 4 }}>{bal.balance > 0 ? "له هذا المبلغ (تدين له)" : bal.balance < 0 ? "عليه هذا المبلغ (يدين لك)" : "الحساب متوازن"}</div>
-      </div>
-
-      <div style={{ ...box, background: "#0f1830", border: "1px solid #243352" }}>
-        <div style={{ fontWeight: 900, marginBottom: 8, fontSize: 13.5 }}>📊 الوضع المالي لأجهزته ({myDevices.length} جهاز)</div>
-        <div style={{ ...row, marginTop: 0 }}><span>💵 دين زبائنه (المتبقي عليهم)</span><strong className={custDebt > 0 ? "sn-neg" : ""}>{money(custDebt)} عملة</strong></div>
-        <div style={row}><span>💰 المُحصّل من زبائنه فعلاً</span><strong className="sn-pos">{money(custCollected)} عملة</strong></div>
-        <div style={row}><span>💰 نصيبه من الأرباح ({Number(agent.percent) || 0}%)</span><strong>{money(bal.share)} عملة</strong></div>
-        <div style={row}><span>🏭 ما علينا للمورّد (غير مدفوع)</span><strong className={supUnpaid > 0 ? "sn-neg" : ""}>{fcfa(supUnpaid)} FCFA</strong></div>
-        <div style={row}><span>🏭 إجمالي تكلفة أجهزته للمورّد</span><strong>{fcfa(supCostAll)} FCFA</strong></div>
+        <div style={{ color: "#8b95ac", fontSize: 11.5, marginTop: 4 }}>{remaining > 0 ? "هذا ما يدين لك به المندوب" : remaining < 0 ? "دفع لك أكثر من المطلوب" : "الحساب متوازن"}</div>
       </div>
 
       <div style={box}>
-        <div style={{ ...row, marginTop: 0 }}><span>➕ الرصيد المضاف له</span><strong style={{ color: posCol }}>{money(bal.credits)} عملة</strong></div>
-        <div style={row}><span>➖ المدفوع/المسحوب</span><strong style={{ color: negCol }}>{money(bal.payouts + bal.debits)} عملة</strong></div>
+        <div style={head}>🧾 حسابه معي (FCFA)</div>
+        <div style={{ ...row, marginTop: 0 }}><span>📌 إجمالي ما عليه (ديون زبائنه)</span><strong>{money(liab)} FCFA</strong></div>
+        <div style={row}><span>💰 ما دفعه لي</span><strong className="sn-pos">{money(paidByAgent)} FCFA</strong></div>
+        <div style={row}><span>🔻 المتبقّي عليه</span><strong className={remaining > 0 ? "sn-neg" : "sn-pos"}>{money(remaining)} FCFA</strong></div>
       </div>
+
+      <div style={box}>
+        <div style={head}>📈 أرباح أجهزته (FCFA)</div>
+        <div style={{ ...row, marginTop: 0 }}><span>🤝 ربحنا معاً (لو دُفع كل شيء)</span><strong className={combinedFull < 0 ? "sn-neg" : ""}>{f(combinedFull)} FCFA</strong></div>
+        <div style={row}><span>🟢 صافي ربحي أنا (بعد الطرفين)</span><strong className={myNetFull < 0 ? "sn-neg" : "sn-pos"}>{f(myNetFull)} FCFA</strong></div>
+        <div style={row}><span>🟢 صافي ربح المندوب (بعد الطرفين)</span><strong className={agentNetFull < 0 ? "sn-neg" : "sn-pos"}>{f(agentNetFull)} FCFA</strong></div>
+        <div style={{ ...row, borderTop: "1px dashed #2a3550", paddingTop: 8, marginTop: 4 }}><span>⏳ صافي ربح المندوب حالياً (المُحصّل فعلاً)</span><strong className={agentNetNow < 0 ? "sn-neg" : "sn-pos"}>{f(agentNetNow)} FCFA</strong></div>
+      </div>
+
+      <div style={box}>
+        <div style={head}>🏭 المورّد (FCFA)</div>
+        <div style={{ ...row, marginTop: 0 }}><span>ديون المورّد علينا (غير مدفوع)</span><strong className={supUnpaid > 0 ? "sn-neg" : ""}>{f(supUnpaid)} FCFA</strong></div>
+        <div style={row}><span>ما دفعناه له فعلاً</span><strong>{f(supPaid)} FCFA</strong></div>
+      </div>
+
+      <div style={box}>
+        <div style={head}>💵 ديون زبائنه ({myDevices.length})</div>
+        {myDevices.length === 0 ? (
+          <p className="sn-hint" style={{ textAlign: "center", margin: 0 }}>لا أجهزة.</p>
+        ) : (
+          myDevices.map((d) => (
+            <div key={d.id} style={row}><span style={{ minWidth: 0 }}>{d.customerName || "بدون اسم"}{d.accountNumber ? ` (${d.accountNumber})` : ""}</span><strong className={tb(d.debt, d.debtCurrency || d.currency || "MRU") > 0 ? "sn-neg" : "sn-pos"}>{f(tb(d.debt, d.debtCurrency || d.currency || "MRU"))} FCFA</strong></div>
+          ))
+        )}
+      </div>
+
+      <button onClick={() => exportAgentPDF(agent, data, settings)} style={{ width: "100%", marginBottom: 10, background: "#13294a", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>📄 كشف PDF (للإرسال)</button>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-        <button onClick={() => ask(`كم تضيف لرصيد ${agent.name}؟`, (v, n) => onAddCredit(v, n))} style={{ flex: 1, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➕ إضافة رصيد له</button>
-        <button onClick={() => ask(`كم يسحب/يُسلّم لـ ${agent.name}؟`, (v, n) => onWithdraw(v, n))} style={{ flex: 1, background: "#3a1620", color: "#fca5a5", border: "1px solid #5a2a3a", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➖ سحب / تسليم</button>
+        <button onClick={() => ask(`كم دفع لك ${agent.name}؟ (FCFA)`, (v, n) => onWithdraw(v, n))} style={{ flex: 1, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>💰 سجّل دفعة منه</button>
+        <button onClick={() => ask(`كم تزيد على دين المندوب؟ (FCFA)`, (v, n) => onAddCredit(v, n))} style={{ flex: 1, background: "#3a2a16", color: "#fcd34d", border: "1px solid #5a4a2a", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➕ زيادة عليه</button>
       </div>
 
-      <button onClick={zero} style={{ width: "100%", marginBottom: 14, background: "#3a1620", color: "#fca5a5", border: "1px solid #5a2a3a", borderRadius: 12, padding: "11px", fontFamily: "inherit", fontWeight: 800, fontSize: 13.5 }}>🗑️ بدء حساب جديد من الصفر</button>
+      <button onClick={reset} style={{ width: "100%", marginBottom: 14, background: "#3a1620", color: "#fca5a5", border: "1px solid #5a2a3a", borderRadius: 12, padding: "11px", fontFamily: "inherit", fontWeight: 800, fontSize: 13.5 }}>🗑️ بدء حساب جديد من الصفر</button>
 
-      <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>📒 كشف الحساب</h3>
-      {entries.length === 0 && <p className="sn-hint" style={{ textAlign: "center" }}>لا حركات بعد.</p>}
-      {entries.map((e) => {
-        const isCredit = e.kind === "credit";
+      <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>📒 كشف الدفعات</h3>
+      {payments.length === 0 && <p className="sn-hint" style={{ textAlign: "center" }}>لا دفعات بعد.</p>}
+      {payments.map((e) => {
+        const isPlus = e.kind === "credit";
         return (
           <div key={e.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#111a36", border: "1px solid #243352", borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 800, fontSize: 13.5, color: isCredit ? posCol : negCol }}>{isCredit ? "➕ إضافة رصيد" : e.kind === "payout" ? "💵 تسليم نصيب" : "➖ سحب"}</div>
+              <div style={{ fontWeight: 800, fontSize: 13.5, color: isPlus ? negCol : posCol }}>{isPlus ? "➕ زيادة عليه" : e.kind === "payout" ? "💵 تسليم" : "💰 دفعة منه"}</div>
               <div style={{ color: "#8b95ac", fontSize: 12 }}>{fmtDate(e.date)}{e.note ? ` • ${e.note}` : ""}</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <strong style={{ color: isCredit ? posCol : negCol, fontSize: 14 }}>{isCredit ? "+" : "−"}{money(e.amount)}</strong>
+              <strong style={{ color: isPlus ? negCol : posCol, fontSize: 14 }}>{money(e.amount)} FCFA</strong>
               {e.kind !== "payout" && <button onClick={() => onDeleteEntry(e.id)} style={{ background: "transparent", border: "none", color: "#fb7185", fontSize: 16, cursor: "pointer" }}>🗑️</button>}
             </div>
           </div>
