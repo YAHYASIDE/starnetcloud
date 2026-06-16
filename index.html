@@ -55,7 +55,7 @@ body.signed #root{padding-top:34px}
 <div id="login">
 <div class="star">⭐</div>
 <h1>STAR NET</h1>
-<p class="sub">إدارة اشتراكات ستارلينك — نسخة سحابية</p>
+<p class="sub">إدارة اشتراكات ستارلينك — نسخة سحابية <b id="ver">v14</b></p>
 <div class="card">
 <div id="login-err"></div>
 <label>البريد الإلكتروني</label>
@@ -77,40 +77,41 @@ window.__tryMount = function(){ var s=window.__state; if(s.authReady && s.mountF
 <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin></script>
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js" crossorigin></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js" crossorigin></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js" crossorigin></script>
 
+<script>
 const firebaseConfig={apiKey:"AIzaSyDDmM2KQV8FoMK0SbK6-yXC1eY41VH0Nl8",authDomain:"yahyanajim-92897.firebaseapp.com",projectId:"yahyanajim-92897",storageBucket:"yahyanajim-92897.firebasestorage.app",messagingSenderId:"894821585663",appId:"1:894821585663:web:597ff582d6034eea88f2ca"};
 
 // الحسابات المصرّح لها بالدخول فقط
 const ALLOWED = ["yahyaazawadi91@gmail.com","etssadaga6@gmail.com","etssadaga@gmail.com"];
 
-const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=(id)=>document.getElementById(id);
+firebase.initializeApp(firebaseConfig);
+const auth=firebase.auth(),db=firebase.firestore(),$=(id)=>document.getElementById(id);
 function showErr(m){const e=$("login-err");e.textContent=m||"";e.style.display=m?"block":"none";}
 function busy(b){$("btn-in").disabled=b;}
 function mapErr(c){const m={"auth/invalid-email":"البريد غير صحيح","auth/missing-password":"أدخل كلمة المرور","auth/invalid-credential":"البريد أو كلمة المرور غير صحيحة","auth/user-not-found":"لا يوجد حساب بهذا البريد","auth/wrong-password":"كلمة المرور غير صحيحة","auth/network-request-failed":"تحقّق من الإنترنت","auth/too-many-requests":"محاولات كثيرة، انتظر قليلاً"};return m[c]||("خطأ: "+c);}
-$("btn-in").addEventListener("click",async()=>{showErr("");busy(true);try{await signInWithEmailAndPassword(auth,$("email").value.trim(),$("pass").value);}catch(e){showErr(mapErr(e.code));}busy(false);});
-window.__logout=()=>{try{signOut(auth);}catch(e){}};
+$("btn-in").addEventListener("click",async()=>{showErr("");busy(true);try{await auth.signInWithEmailAndPassword($("email").value.trim(),$("pass").value);}catch(e){showErr(mapErr(e.code));}busy(false);});
+window.__logout=()=>{try{auth.signOut();}catch(e){}};
 
 // التخزين السحابي المشترك: مستند واحد business/main يصل إليه الثلاثة
-const SHARED=doc(db,"business","main");
-const BACKUP=doc(db,"business","backup"); // نسخة احتياطية سحابية منفصلة
+const SHARED=db.doc("business/main");
+const BACKUP=db.doc("business/backup"); // نسخة احتياطية سحابية منفصلة
 let cache={},saveTimer=null,bkTimer=null;
-function scheduleSave(){const st=$("sync-status");if(st){st.textContent="… يحفظ";st.style.color="#fbbf24";}clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{try{await setDoc(SHARED,cache);if(st){st.textContent="✓ محفوظ سحابياً";st.style.color="#6ee7b7";}}catch(e){console.error(e);if(st){st.textContent="⚠️ تعذّر الحفظ";st.style.color="#fca5a5";}}},700);}
-function scheduleBackupSave(v){clearTimeout(bkTimer);bkTimer=setTimeout(async()=>{try{await setDoc(BACKUP,{value:v,at:Date.now()});}catch(e){console.warn("backup",e);}},1500);}
-function setupStorage(uid){window.storage={async get(k){if(k==="starnet_autobackup"){try{const sd=await getDoc(BACKUP);if(sd.exists()&&sd.data()&&sd.data().value)return{key:k,value:sd.data().value};}catch(e){}try{const v=localStorage.getItem("sn_bk");return v==null?null:{key:k,value:v};}catch(e){return null;}}return(k in cache&&cache[k]!=null)?{key:k,value:cache[k]}:null;},async set(k,v){if(k==="starnet_autobackup"){try{localStorage.setItem("sn_bk",v);}catch(e){}scheduleBackupSave(v);return{key:k,value:v};}cache[k]=v;scheduleSave();return{key:k,value:v};},async delete(k){delete cache[k];scheduleSave();return{key:k,deleted:true};},async list(p){return{keys:Object.keys(cache).filter(x=>!p||x.startsWith(p)),prefix:p};}};}
+function scheduleSave(){const st=$("sync-status");if(st){st.textContent="… يحفظ";st.style.color="#fbbf24";}clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{try{await SHARED.set(cache);if(st){st.textContent="✓ محفوظ سحابياً";st.style.color="#6ee7b7";}}catch(e){console.error(e);if(st){st.textContent="⚠️ تعذّر الحفظ";st.style.color="#fca5a5";}}},700);}
+function scheduleBackupSave(v){clearTimeout(bkTimer);bkTimer=setTimeout(async()=>{try{await BACKUP.set({value:v,at:Date.now()});}catch(e){console.warn("backup",e);}},1500);}
+function setupStorage(uid){window.storage={async get(k){if(k==="starnet_autobackup"){try{const sd=await BACKUP.get();if(sd.exists&&sd.data()&&sd.data().value)return{key:k,value:sd.data().value};}catch(e){}try{const v=localStorage.getItem("sn_bk");return v==null?null:{key:k,value:v};}catch(e){return null;}}return(k in cache&&cache[k]!=null)?{key:k,value:cache[k]}:null;},async set(k,v){if(k==="starnet_autobackup"){try{localStorage.setItem("sn_bk",v);}catch(e){}scheduleBackupSave(v);return{key:k,value:v};}cache[k]=v;scheduleSave();return{key:k,value:v};},async delete(k){delete cache[k];scheduleSave();return{key:k,deleted:true};},async list(p){return{keys:Object.keys(cache).filter(x=>!p||x.startsWith(p)),prefix:p};}};}
 
-onAuthStateChanged(auth,async(user)=>{
+auth.onAuthStateChanged(async(user)=>{
   if(user){
     const email=(user.email||"").toLowerCase();
-    if(!ALLOWED.includes(email)){ showErr("هذا الحساب غير مصرّح له بالدخول"); try{await signOut(auth);}catch(e){} return; }
+    if(!ALLOWED.includes(email)){ showErr("هذا الحساب غير مصرّح له بالدخول"); try{await auth.signOut();}catch(e){} return; }
     // تحميل البيانات المشتركة + ترحيل بيانات المالك القديمة مرّة واحدة إن لزم
     try{
-      const s=await getDoc(SHARED); cache=s.exists()?(s.data()||{}):{};
+      const s=await SHARED.get(); cache=s.exists?(s.data()||{}):{};
       if(!cache || !cache["starnet_data_v1"]){
-        try{ const old=await getDoc(doc(db,"users",user.uid)); if(old.exists() && old.data() && old.data()["starnet_data_v1"]){ cache=old.data(); await setDoc(SHARED,cache); } }catch(e){}
+        try{ const old=await db.doc("users/"+user.uid).get(); if(old.exists && old.data() && old.data()["starnet_data_v1"]){ cache=old.data(); await SHARED.set(cache); } }catch(e){}
       }
     }catch(e){console.error(e);cache={};}
     setupStorage(user.uid);
@@ -120,7 +121,7 @@ onAuthStateChanged(auth,async(user)=>{
     $("login").style.display="none"; $("topbar").style.display="flex";
     // 🔔 مراقبة لحظية: إشعار فوري عند أي عملية من مستخدم آخر (دون لمس البيانات لتفادي التعارض)
     try{
-      onSnapshot(SHARED,(snap)=>{
+      SHARED.onSnapshot((snap)=>{
         try{
           if(snap.metadata && snap.metadata.hasPendingWrites) return; // تجاهل كتاباتي المحلية
           const d=snap.data()||{};
