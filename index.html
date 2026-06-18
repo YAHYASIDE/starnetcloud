@@ -1403,7 +1403,18 @@ function navBadge(id){
   return `<span class="${cls}" style="margin-inline-start:auto;background:#dc2626;color:#fff;border-radius:10px;min-width:18px;text-align:center;padding:1px 6px;font-size:11px;font-weight:800;display:${n>0?'inline-block':'none'}">${n}</span>`;
 }
 function updateRegBadge(){const n=pendingRegCount();document.querySelectorAll('.reg-badge').forEach(b=>{b.textContent=n;b.style.display=n>0?'inline-block':'none';});}
-function updateOrderBadge(){const n=pendingOrderCount();document.querySelectorAll('.order-badge').forEach(b=>{b.textContent=n;b.style.display=n>0?'inline-block':'none';});}
+function updateOrderBadge(){const n=pendingOrderCount();document.querySelectorAll('.order-badge').forEach(b=>{b.textContent=n;b.style.display=n>0?'inline-block':'none';});if(typeof showOrderAlert==='function')showOrderAlert();}
+function showOrderAlert(){
+  if(!CUR_USER){const ex=document.getElementById('orderAlert');if(ex)ex.remove();return;}
+  const n=pendingOrderCount();
+  let el=document.getElementById('orderAlert');
+  if(n<=0||current==='orders'){if(el)el.remove();return;}
+  if(!el){el=document.createElement('div');el.id='orderAlert';
+    el.onclick=()=>{el.remove();if(typeof go==='function')go('orders');};
+    el.style.cssText='position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:5000;background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;padding:13px 22px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.28);font-weight:800;font-size:14.5px;cursor:pointer;display:flex;align-items:center;gap:10px;max-width:92vw;text-align:center';
+    document.body.appendChild(el);}
+  el.innerHTML=`🛒 لديك ${n} طلب جديد — اضغط للمراجعة والتحويل لفاتورة`;
+}
 function buildNav(){
   const pages=PAGES.filter(p=>p.sep||(can(p.id)&&!p.hide));
   const html=pages.map(p=>p.sep?'<div class="sep"></div>':
@@ -3669,6 +3680,7 @@ function vOrders(v){
     </div></div>`;
   ordersRefresh();
   try{localStorage.setItem('sadaqa_seen_order',Date.now());}catch(e){}
+  const al=document.getElementById('orderAlert');if(al)al.remove();
   updateOrderBadge();
 }
 function ordersRefresh(){
@@ -4603,7 +4615,7 @@ function renderStoreCart(){
   foot.innerHTML=`
     <div style="display:flex;justify-content:space-between;font-size:18px;font-weight:800;margin-bottom:14px">
       <span>${t('total')}</span><span class="t-num">${m(total)}</span></div>
-    <button class="store-cta" style="background:#25D366" onclick="checkoutWhatsApp()">${t('checkoutWa')}</button>
+    <button class="store-cta" style="background:linear-gradient(135deg,var(--primary),#3b82f6);font-size:16.5px;padding:15px" onclick="checkoutWhatsApp()">🛒 إتمام الطلب والدفع</button>
     <button class="btn btn-ghost" style="width:100%;justify-content:center;margin-top:8px" onclick="CART=[];saveCart();renderStoreCart();updateCartBadge();renderStoreGrid();renderDeals()">${t('clearCart')}</button>`;
 }
 function cartStoreQty(i,d){const l=CART[i];l.qty+=d;if(l.qty<=0)CART.splice(i,1);saveCart();renderStoreCart();updateCartBadge();renderStoreGrid();renderDeals();}
@@ -4620,29 +4632,26 @@ function checkoutWhatsApp(){
 function openCheckout(num){
   _coords=null;_payProof=null;
   const v=getVisitor()||{};
-  const pays=(DB.settings.payments||[]).filter(Boolean);
   const total=CART.reduce((a,l)=>a+l.price*l.qty,0);
   modal({title:t('checkoutTitle'),size:'lg',body:`
     <div style="background:var(--primary-soft);color:var(--primary-d);border-radius:12px;padding:11px 14px;margin-bottom:14px;display:flex;justify-content:space-between;font-weight:800;font-size:15px">
       <span>${t('total')}</span><span>${money(total)} ${CUR()}</span></div>
     <div class="grid2">
-      <div class="field"><label>${t('coName')} *</label><input class="inp" id="co_name" value="${esc(v.name||DB.settings.guestName||'')}"></div>
+      <div class="field"><label>${t('coName')} *</label><input class="inp" id="co_name" value="${esc(v.name||DB.settings.guestName||'')}" ${v.name?'readonly style="background:var(--surface-2,#f1f5f9)"':''}></div>
       <div class="field"><label>${t('coPhone')} *</label>
         <div style="display:flex;gap:6px"><select class="inp" id="co_cc" style="max-width:120px">${ccOptions(v.cc||'222')}</select>
         <input class="inp" id="co_phone" type="tel" inputmode="tel" placeholder="رقم الهاتف" value="${esc(v.phone||'')}" style="flex:1"></div>
       </div>
     </div>
-    <div class="field"><label>${t('coAddr')}</label><input class="inp" id="co_addr"></div>
-    <div class="field"><label>${t('coPay')}</label><select class="inp" id="co_pay">${pays.length?pays.map(p=>`<option>${esc(p)}</option>`).join(''):`<option>${t('coPayDef')}</option>`}</select></div>
+    <div class="field"><label>${t('coAddr')}</label><input class="inp" id="co_addr" placeholder="مكان التوصيل"></div>
     <div class="field"><label>${t('coLoc')}</label>
       <button type="button" class="btn" id="co_locBtn" style="width:100%;justify-content:center" onclick="getCheckoutLocation()">${svg(I.store,16)} <span id="co_locTxt">${t('coLocBtn')}</span></button>
       <div id="co_locMsg" style="font-size:12.5px;margin-top:6px;color:var(--muted)"></div>
     </div>
-    <div class="field"><label>${t('coNote')}</label><textarea class="inp" id="co_note" style="min-height:60px"></textarea></div>
-  `,actions:[
-    {label:'متابعة ›',primary:true,fn:()=>submitCheckout(num,total)},
-    {label:t('close'),fn:()=>true}
-  ]});
+    <div class="field"><label>${t('coNote')}</label><textarea class="inp" id="co_note" style="min-height:55px"></textarea></div>
+    <input type="hidden" id="co_pay" value="">
+    <button class="store-cta" style="background:linear-gradient(135deg,#16a34a,#22c55e);font-size:17px;padding:15px;margin-top:6px" onclick="submitCheckout('${num}',${total})">متابعة للدفع ›</button>
+  `,actions:[{label:t('close'),fn:()=>true}]});
   setTimeout(getCheckoutLocation,300);
 }
 function getCheckoutLocation(){
@@ -4681,7 +4690,8 @@ function fallbackCopy(txt,cb){const ta=document.createElement('textarea');ta.val
 function payApps(){return boxes().filter(b=>b.type==='app'||b.type==='bank');}
 function deliveryFee(){return Number(DB.settings.delivery)||0;}
 function openPaymentStep(ctx){
-  _payProof=null;_payMode='cod';_payApp='';
+  _payProof=null;_payMode='full';
+  _payApp=(payApps().find(b=>/bankily|بنكيلي/i.test(b.name))||payApps()[0]||{}).id||'';
   ctx.delivery=deliveryFee();
   ctx.itemsTotal=CART.reduce((a,l)=>a+l.price*l.qty,0);
   ctx.grandTotal=ctx.itemsTotal+ctx.delivery;
@@ -4726,7 +4736,7 @@ function renderPaymentStep(ctx){
     pane=grid+numBox+depo+proof;
   }
   modal({title:'الدفع وإرسال الطلب',size:'lg',body:summary+tabs+pane,
-    actions:[{label:'إرسال الطلب',primary:true,icon:I.check,fn:()=>submitOrder(ctx)},{label:t('close'),fn:()=>true}]});
+    actions:[{label:'إرسال الطلب عبر واتساب',primary:true,icon:I.wa,fn:()=>submitOrder(ctx)},{label:t('close'),fn:()=>true}]});
 }
 function submitOrder(ctx){
   let payMode=_payMode,deposit=0,appBox=null,payNum='';
