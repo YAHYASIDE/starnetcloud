@@ -366,6 +366,32 @@ function fmtDate(s) {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   return `${dd}/${mm}/${d.getFullYear()}`; // أرقام لاتينية
 }
+// تنسيق تاريخ + وقت من قيمة ISO (لوقت آخر تعديل)
+function fmtDateTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}/${mm}/${d.getFullYear()} ${hh}:${mi}`;
+}
+// وقت نسبي مختصر بالعربية: الآن / منذ Xد / منذ Xس / منذ Xي ثم التاريخ الكامل
+function timeAgo(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return "الآن";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `منذ ${m} د`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `منذ ${h} س`;
+  const days = Math.floor(h / 24);
+  if (days < 30) return `منذ ${days} ي`;
+  return fmtDateTime(iso);
+}
 function asNotes(n) {
   if (Array.isArray(n)) return n;
   if (typeof n === "string" && n.trim()) return [n];
@@ -938,7 +964,7 @@ function StarNetApp() {
     snapshot(isNew ? "إضافة جهاز" : "تعديل جهاز");
     setData((d) => {
       const endDate = computeEnd(form.startDate, form.durationDays, settings);
-      const dev = { ...form, endDate };
+      const dev = { ...form, endDate, updatedAt: new Date().toISOString() };
       const hwCost = Number(form._hwCost) || 0;       // تكلفة شراء الجهاز (من المتجر) — تُطرح مرّة واحدة
       const hwCur = form._hwCostCur || "USDT";
       const storeItem = form._storeItem || "";
@@ -1056,6 +1082,7 @@ function StarNetApp() {
               durationDays: info.durationDays,
               endDate: newEnd,
               broken: false,
+              updatedAt: new Date().toISOString(),
               package: info.package || x.package || "",
               // عملية جديدة كاملة: نحدّث كل بيانات العملية
               country: info.country,
@@ -3283,6 +3310,7 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
             {d.costPaid && d.cost > 0 && <span className="sn-fin sn-fin--paid">🏷️ سُدّد للمورّد</span>}
             {d.broken && <span className="sn-fin sn-fin--brk">🔧 معطّل</span>}
           </div>
+          {d.updatedAt && <span className="sn-card-edited">🕒 آخر تعديل: {timeAgo(d.updatedAt)}</span>}
         </div>
         <div className="sn-card-status">
           <div className="sn-quick-acts" onClick={(e) => e.stopPropagation()}>
@@ -4994,7 +5022,9 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
 
       <div style={box}>
         <div style={head}>🧾 حسابه معي (FCFA)</div>
-        <div style={{ ...row, marginTop: 0 }}><span>📌 إجمالي ما عليه (ديون زبائنه)</span><strong>{money(liab)} FCFA</strong></div>
+        <div style={{ ...row, marginTop: 0 }}><span>📌 ديون زبائنه الحالية</span><strong>{f(custDebt)} FCFA</strong></div>
+        {credits > 0 && <div style={row}><span>➕ زيادات يدوية عليه</span><strong>{money(credits)} FCFA</strong></div>}
+        <div style={{ ...row, fontWeight: 800 }}><span>📌 إجمالي المطلوب منه</span><strong>{money(liab)} FCFA</strong></div>
         <div style={row}><span>💰 ما دفعه لي</span><strong className="sn-pos">{money(paidByAgent)} FCFA</strong></div>
         <div style={row}><span>🔻 المتبقّي عليه</span><strong className={remaining > 0 ? "sn-neg" : "sn-pos"}>{money(remaining)} FCFA</strong></div>
       </div>
@@ -5021,6 +5051,12 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
           myDevices.map((d) => (
             <div key={d.id} style={row}><span style={{ minWidth: 0 }}>{d.customerName || "بدون اسم"}{d.accountNumber ? ` (${d.accountNumber})` : ""}</span><strong className={tb(d.debt, d.debtCurrency || d.currency || "MRU") > 0 ? "sn-neg" : "sn-pos"}>{f(tb(d.debt, d.debtCurrency || d.currency || "MRU"))} FCFA</strong></div>
           ))
+        )}
+        {myDevices.length > 0 && (
+          <div style={{ ...row, borderTop: "1px solid #243352", paddingTop: 8, marginTop: 8, fontWeight: 800 }}>
+            <span>الإجمالي ({myDevices.length})</span>
+            <strong className={custDebt > 0 ? "sn-neg" : "sn-pos"}>{f(custDebt)} FCFA</strong>
+          </div>
         )}
       </div>
 
@@ -7174,6 +7210,26 @@ const CSS = `
 .sn-toast{position:fixed;bottom:96px;inset-inline:0;margin:0 auto;width:fit-content;max-width:90%;background:var(--elevated);color:var(--text);border:1px solid var(--border);padding:11px 20px;border-radius:30px;font-size:13.5px;z-index:80;box-shadow:0 8px 24px rgba(0,0,0,.4);animation:sn-up .25s ease}
 .sn-undo{position:fixed;bottom:140px;inset-inline:0;margin:0 auto;width:fit-content;max-width:92%;display:flex;align-items:center;gap:14px;background:var(--elevated);border:1px solid var(--border);padding:9px 9px 9px 16px;border-radius:30px;z-index:81;box-shadow:0 8px 24px rgba(0,0,0,.5);font-size:13px;animation:sn-up .25s ease}
 .sn-undo button{background:var(--accent);color:#fff;border:none;border-radius:20px;padding:8px 16px;font-family:inherit;font-weight:800;font-size:13px;cursor:pointer}
+
+/* ====== لوحة ألوان احترافية موحّدة لشارات البطاقة ====== */
+.sn-card-edited{display:block;font-size:10.5px;color:var(--muted);margin-top:6px;font-weight:600;opacity:.9}
+.sn-fin,.sn-dup-badge,.sn-origin-badge{font-size:10.5px;font-weight:700;border-radius:8px;padding:3px 8px}
+.sn-badge{font-size:10.5px;font-weight:700;border-radius:8px;padding:3px 9px}
+/* محايد — معلومات غير حرجة (رمادي مزرقّ هادئ) */
+.sn-fin--link,.sn-fin--sup,.sn-tag-badge,.sn-pkg-badge,.sn-inst-badge.inst-prog,
+.sn-origin-badge--note,.sn-badge--soon,.sn-fin--paid{
+  background:rgba(148,163,184,.12)!important;color:#c4cee0!important;border:1px solid rgba(148,163,184,.26)!important}
+/* إيجابي — جيد/مدفوع/نشط (أخضر هادئ) */
+.sn-fin--ok,.sn-fin--good,.sn-fin--cred,.sn-origin-badge--clean,
+.sn-inst-badge.inst-done,.sn-badge--active{
+  background:rgba(52,211,153,.12)!important;color:#74dcae!important;border:1px solid rgba(52,211,153,.26)!important}
+/* خطر — دين/متأخّر/معطّل (أحمر هادئ) */
+.sn-fin--debt,.sn-fin--late,.sn-fin--brk,.sn-fin--warn,
+.sn-origin-badge--hadDebt,.sn-badge--expired{
+  background:rgba(248,113,113,.12)!important;color:#f0a6ab!important;border:1px solid rgba(248,113,113,.28)!important;animation:none!important}
+/* تنبيه — مطلوب/مكرّر (كهرماني هادئ) */
+.sn-dup-badge,.sn-inst-badge.inst-req,.sn-badge--urgent{
+  background:rgba(251,191,36,.12)!important;color:#e8c468!important;border:1px solid rgba(251,191,36,.26)!important}
 
 /* ====== شاشات اللابتوب والشاشات الكبيرة ====== */
 @media (min-width:1024px){
