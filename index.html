@@ -54,6 +54,13 @@ body.signed #root{padding-top:34px}
 #login-err{display:none;background:rgba(244,63,94,.12);border:1px solid rgba(244,63,94,.4);color:#fca5a5;border-radius:10px;padding:9px 12px;font-size:13px;text-align:center}
 .hint{color:#7b86a0;font-size:11.5px;text-align:center;line-height:1.7}
 .star{font-size:46px}
+@media (min-width:1024px){
+  #login h1{font-size:34px;letter-spacing:1.5px}
+  #login p.sub{font-size:15px}
+  .card{max-width:430px;padding:28px;border-radius:24px;gap:15px;box-shadow:0 30px 80px rgba(0,0,0,.55)}
+  .card input,.btn{font-size:16px;padding:15px 16px}
+  .star{font-size:62px}
+}
 </style>
 </head>
 <body>
@@ -7167,6 +7174,47 @@ const CSS = `
 .sn-toast{position:fixed;bottom:96px;inset-inline:0;margin:0 auto;width:fit-content;max-width:90%;background:var(--elevated);color:var(--text);border:1px solid var(--border);padding:11px 20px;border-radius:30px;font-size:13.5px;z-index:80;box-shadow:0 8px 24px rgba(0,0,0,.4);animation:sn-up .25s ease}
 .sn-undo{position:fixed;bottom:140px;inset-inline:0;margin:0 auto;width:fit-content;max-width:92%;display:flex;align-items:center;gap:14px;background:var(--elevated);border:1px solid var(--border);padding:9px 9px 9px 16px;border-radius:30px;z-index:81;box-shadow:0 8px 24px rgba(0,0,0,.5);font-size:13px;animation:sn-up .25s ease}
 .sn-undo button{background:var(--accent);color:#fff;border:none;border-radius:20px;padding:8px 16px;font-family:inherit;font-weight:800;font-size:13px;cursor:pointer}
+
+/* ====== شاشات اللابتوب والشاشات الكبيرة ====== */
+@media (min-width:1024px){
+  /* خلفية محيطة تجعل التطبيق يبدو كلوحة مستقلة وسط الشاشة */
+  body{background:
+    radial-gradient(1200px 620px at 50% -12%, rgba(79,157,255,.12), transparent 60%),
+    radial-gradient(900px 520px at 92% 4%, rgba(124,92,255,.12), transparent 55%),
+    #06080F;}
+  .sn-root{
+    max-width:1080px;
+    border-inline:1px solid var(--border);
+    box-shadow:0 0 0 1px rgba(255,255,255,.04), 0 36px 90px rgba(0,0,0,.6);
+    border-radius:0 0 22px 22px;
+    font-size:16px;
+  }
+  /* رأس أوسع وأبهى */
+  .sn-header{padding:32px 34px 28px}
+  .sn-brand h1{font-size:27px}
+  .sn-brand p{font-size:14px}
+  .sn-menu-btn,.sn-hbtn{top:24px}
+  .sn-menu-btn.sn-hbtn{right:24px}
+  .sn-add-btn{left:24px}
+  /* مساحات أوسع للصفحات */
+  .sn-page{padding:28px 34px;gap:22px}
+  /* لوحة الأرباح كأربعة أعمدة (لوحة تحكم) */
+  .sn-profit-grid{grid-template-columns:repeat(4,1fr);gap:16px}
+  .sn-profit{padding:22px 20px}
+  /* مواءمة العناصر الثابتة مع عرض اللوحة */
+  .sn-tabs{max-width:1080px;border-inline:1px solid var(--border)}
+  .sn-sheet{max-width:840px;border-radius:24px}
+  /* الزر العائم قرب حافة اللوحة بدل حافة الشاشة */
+  .sn-fab{
+    inset-inline-end:max(22px, calc((100vw - 1080px)/2 + 22px));
+    bottom:104px;width:62px;height:62px;font-size:32px;
+  }
+}
+@media (min-width:1320px){
+  .sn-root{max-width:1180px}
+  .sn-tabs{max-width:1180px}
+  .sn-fab{inset-inline-end:max(22px, calc((100vw - 1180px)/2 + 22px))}
+}
 `;
 
 
