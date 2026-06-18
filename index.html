@@ -313,6 +313,7 @@ const DEFAULT_DATA = {
   personNumbers: {}, // رقم تسلسلي ثابت لكل شخص
   agentPayouts: [], // تسويات المندوبين: {id, agentId, amount, date}
   agentLedger: [], // حساب المندوب الجاري: {id, agentId, type:"credit"|"debit", amount, note, date}
+  customerLedger: [], // كشف حساب الزبون: {id, key, type:"debit"|"credit", amount, currency, note, date} | debit=دين عليه، credit=رصيد له/دفعة
   inventory: [], // المخزون: {id, name, category(device|accessory), qty, cost, costCurrency, price, currency}
   pendingInstalls: [], // أجهزة مُباعة قيد التركيب لم تُشحن بعد: {id, itemName, buyerName, dialCode, phone, email, salePrice, saleCurrency, date}
   orders: [], // قائمة انتظار الطلبات: {id, customerName, phone, note, status, date}
@@ -758,6 +759,7 @@ function StarNetApp() {
   const [editingContact, setEditingContact] = useState(null); // contact | "new" | null
   const [viewAgent, setViewAgent] = useState(null); // agent being viewed
   const [accountAgent, setAccountAgent] = useState(null); // agent whose account is open
+  const [accountCustomer, setAccountCustomer] = useState(null); // device whose person account is open
   const [confirm, setConfirm] = useState(null); // {text, onYes}
 
   // رجوع خطوة للوراء: يغلق أعلى نافذة مفتوحة، وإلا يعود للرئيسية
@@ -775,6 +777,7 @@ function StarNetApp() {
     if (editingCountry) { setEditingCountry(null); return; }
     if (viewAgent) { setViewAgent(null); return; }
     if (accountAgent) { setAccountAgent(null); return; }
+    if (accountCustomer) { setAccountCustomer(null); return; }
     if (confirm) { setConfirm(null); return; }
     if (panel) { setPanel(null); return; }
     if (drawer) { setDrawer(false); return; }
@@ -1419,6 +1422,23 @@ function StarNetApp() {
     setData((d) => ({ ...d, agentLedger: (d.agentLedger || []).filter((l) => l.id !== id) }));
     flash("حُذف القيد");
   }
+  // كشف حساب الزبون: debit = دين عليه، credit = رصيد له / دفعة منه
+  function addCustomerLedger(device, type, amount, note, currency) {
+    const amt = Number(amount) || 0;
+    if (amt <= 0) return;
+    const key = personKey(device);
+    if (!key) return;
+    setData((d) => ({
+      ...d,
+      customerLedger: [{ id: uid(), key, type, amount: amt, currency: currency || device.currency || "MRU", note: note || "", date: todayStr() }, ...(d.customerLedger || [])],
+    }));
+    flash(type === "debit" ? `أُضيف دين ${money(amt)} على الزبون ✅` : `سُجّل ${money(amt)} للزبون ✅`);
+    playSound(type === "debit" ? "save" : "payment");
+  }
+  function deleteCustomerLedger(id) {
+    setData((d) => ({ ...d, customerLedger: (d.customerLedger || []).filter((l) => l.id !== id) }));
+    flash("حُذف القيد");
+  }
   function resetAgentAccount(agent) {
     setData((d) => {
       const rawShare = Math.round(agentProfit(agent.id, d, toBase) * (Number(agent.percent) || 0)) / 100;
@@ -1919,6 +1939,7 @@ function StarNetApp() {
             onArchive={archiveDevice}
             onInstall={cycleInstall}
             onWhats={(dev, kind) => openWhatsApp(dev, kind, settings, customerBalance(dev, data, settings.rates))}
+            onAccount={setAccountCustomer}
           />
         )}
         {tab === "agents" && (
@@ -2112,6 +2133,17 @@ function StarNetApp() {
           onSettle={(amt) => settleAgent(accountAgent, amt)}
           onReset={() => resetAgentAccount(accountAgent)}
           onDeleteEntry={deleteAgentLedger}
+        />
+      )}
+      {accountCustomer && (
+        <CustomerAccountSheet
+          device={accountCustomer}
+          data={data}
+          settings={settings}
+          onClose={() => setAccountCustomer(null)}
+          onAddDebt={(amt, note) => addCustomerLedger(accountCustomer, "debit", amt, note)}
+          onAddCredit={(amt, note) => addCustomerLedger(accountCustomer, "credit", amt, note)}
+          onDeleteEntry={deleteCustomerLedger}
         />
       )}
       {renewing && (
@@ -2983,7 +3015,7 @@ function MicButton({ lang, label, onText }) {
   );
 }
 
-function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkPaid, onBroken, onUnbreak, onCopy, onExport, onExportImage, onArchive, onInstall, onWhats }) {
+function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkPaid, onBroken, onUnbreak, onCopy, onExport, onExportImage, onArchive, onInstall, onWhats, onAccount }) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("all");
 
@@ -3127,6 +3159,7 @@ function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkP
             onArchive={onArchive}
             onInstall={onInstall}
             onWhats={onWhats}
+            onAccount={onAccount}
           />
         ))
       )}
@@ -3197,7 +3230,7 @@ function CField({ k, v, danger, copy, onCopy, color, secret }) {
   );
 }
 
-function DeviceCard({ d, agents = [], countries = [], balance, compact = false, dupReasons = [], personColor, personNumber, toBase, txs = [], onEdit, onRenew, onDelete, onClearDebt, onMarkPaid, onBroken, onUnbreak, onCopy, onExport, onExportImage, onArchive, onInstall, onWhats }) {
+function DeviceCard({ d, agents = [], countries = [], balance, compact = false, dupReasons = [], personColor, personNumber, toBase, txs = [], onEdit, onRenew, onDelete, onClearDebt, onMarkPaid, onBroken, onUnbreak, onCopy, onExport, onExportImage, onArchive, onInstall, onWhats, onAccount }) {
   const [open, setOpen] = useState(false);
   const [showProfit, setShowProfit] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
@@ -3223,6 +3256,10 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
   cardStyle.borderInlineStartColor = riskNoPay ? "#f43f5e" : pc;
   cardStyle.borderInlineStartWidth = riskNoPay ? "6px" : "5px";
   const ledger = deviceLedger(d.id, txs, toBase || ((a) => Number(a) || 0));
+  const _tbCard = (a, c) => (toBase ? toBase(a, c) : Number(a) || 0);
+  const _custDebtBase = d.debt ? _tbCard(d.debt, d.debtCurrency || d.currency || "MRU") : 0;
+  const _supUnpaidBase = (!d.costPaid && d.cost) ? _tbCard(d.cost, d.costCurrency || "USDT") : 0;
+  const expectedProfit = Math.round((ledger.total + _custDebtBase - _supUnpaidBase) * 100) / 100;
   // برنامج الولاء: عدد التجديدات لكل أجهزة هذا الشخص
   const personDevIds = new Set(sameDevs.map((x) => x.id));
   const renewCount = (txs || []).filter((t) => t.type === "تجديد" && personDevIds.has(t.deviceId)).length;
@@ -3315,6 +3352,7 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
         <div className="sn-card-status">
           <div className="sn-quick-acts" onClick={(e) => e.stopPropagation()}>
             {onEdit && <button className="sn-quick-btn" onClick={() => onEdit(d)} title="تعديل" aria-label="تعديل">✏️</button>}
+            {onAccount && <button className="sn-quick-btn" onClick={() => onAccount(d)} title="كشف حساب الزبون" aria-label="كشف حساب">🧾</button>}
             {telNum && <button className="sn-quick-btn" onClick={() => window.open("tel:" + telNum)} title="اتصال" aria-label="اتصال">📞</button>}
             {onWhats && <button className="sn-quick-btn" onClick={() => onWhats(d, "reminder")} title="واتساب" aria-label="واتساب">💬</button>}
             <button className={"sn-quick-btn" + (showProfit ? " sn-quick-on" : "")} onClick={() => setShowProfit(!showProfit)} title="الأرباح" aria-label="الأرباح">💰</button>
@@ -3346,6 +3384,12 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
             <span>إجمالي ربح هذا الجهاز</span>
             <span className={ledger.total >= 0 ? "sn-pos" : "sn-neg"}>{ledger.total >= 0 ? "+" : ""}{money(ledger.total)} عملة</span>
           </div>
+          {(_custDebtBase > 0 || _supUnpaidBase > 0) && (
+            <div className="sn-profit-total" style={{ borderTop: "1px dashed #2a3550" }}>
+              <span>🎯 الربح المتوقّع (لو دُفع كل شيء)</span>
+              <span className={expectedProfit >= 0 ? "sn-pos" : "sn-neg"}>{expectedProfit >= 0 ? "+" : ""}{money(expectedProfit)} عملة</span>
+            </div>
+          )}
           <p className="sn-rate-hint">يُحسب بسعر الصرف الحالي. الزبون يدفع بعملته والمورّد بالدولار.</p>
         </div>
       )}
@@ -3599,10 +3643,19 @@ function Reports({ data, toBase, settings }) {
         }
       }
     });
+    let dayExpectedAdd = 0, monthExpectedAdd = 0;
     data.devices.forEach((d) => {
-      if (d.debt) debt += toBase(d.debt, d.debtCurrency || d.currency || "MRU");
-      if (!d.costPaid && d.cost && !d.broken) { supplierUnpaid += toBase(d.cost, d.costCurrency || "USDT"); usdOwed += Number(d.cost) || 0; }
+      const dDebtB = d.debt ? toBase(d.debt, d.debtCurrency || d.currency || "MRU") : 0;
+      const dSupB = (!d.costPaid && d.cost && !d.broken) ? toBase(d.cost, d.costCurrency || "USDT") : 0;
+      debt += dDebtB;
+      if (dSupB) { supplierUnpaid += dSupB; usdOwed += Number(d.cost) || 0; }
+      const ds = d.startDate || "";
+      if (ds === t) dayExpectedAdd += dDebtB - dSupB;
+      if (ds.slice(0, 7) === month) monthExpectedAdd += dDebtB - dSupB;
     });
+    const expectedAll = Math.round((allP + debt - supplierUnpaid) * 100) / 100;
+    const expectedDay = Math.round((dayP + dayExpectedAdd) * 100) / 100;
+    const expectedMonth = Math.round((monthP + monthExpectedAdd) * 100) / 100;
     // نصيب المندوبين من الأرباح، وصافي ربحي وحدي
     let agentsShare = 0;
     (data.agents || []).forEach((a) => {
@@ -3615,7 +3668,7 @@ function Reports({ data, toBase, settings }) {
       .map((d) => ({ d, p: devProfit[d.id] }))
       .sort((a, b) => a.p - b.p);
     const lossTotal = lossDevices.reduce((s, x) => s + Math.min(0, x.p), 0);
-    return { dayP, monthP, allP, monthRevenue, debt, supplierUnpaid, byCur, byCurExp, agentsShare, myNet, storeP, chargeP, agentChargeP, organicChargeP, usdChargeAll, usdChargeMonth, usdOwed, devProfit, lossDevices, lossTotal, dayIncome, dayExpense, weekProfit, weekSales, weekCount };
+    return { dayP, monthP, allP, monthRevenue, debt, supplierUnpaid, expectedAll, expectedDay, expectedMonth, byCur, byCurExp, agentsShare, myNet, storeP, chargeP, agentChargeP, organicChargeP, usdChargeAll, usdChargeMonth, usdOwed, devProfit, lossDevices, lossTotal, dayIncome, dayExpense, weekProfit, weekSales, weekCount };
   }, [data, toBase, t]);
 
   // أفضل الزبائن + إحصاء الدول + مقارنة الشهر بالماضي
@@ -3720,17 +3773,27 @@ function Reports({ data, toBase, settings }) {
       <Collapse title="📈 الأرباح (اليوم / الشهر / التفصيل)">
         <section className="sn-profit-grid" style={{ marginBottom: 12 }}>
           <div className="sn-profit sn-profit--day">
-            <span className="sn-profit-lbl">أرباح اليوم</span>
+            <span className="sn-profit-lbl">أرباح اليوم (نقدي)</span>
             <strong className={agg.dayP < 0 ? "sn-neg" : ""}>{money(agg.dayP)} <em>عملة</em></strong>
           </div>
+          <div className="sn-profit sn-profit--day">
+            <span className="sn-profit-lbl">🎯 المتوقّع اليوم</span>
+            <strong className={agg.expectedDay < 0 ? "sn-neg" : ""}>{money(agg.expectedDay)} <em>عملة</em></strong>
+          </div>
           <div className="sn-profit sn-profit--month">
-            <span className="sn-profit-lbl">أرباح الشهر</span>
+            <span className="sn-profit-lbl">أرباح الشهر (نقدي)</span>
             <strong className={agg.monthP < 0 ? "sn-neg" : ""}>{money(agg.monthP)} <em>عملة</em></strong>
           </div>
+          <div className="sn-profit sn-profit--month">
+            <span className="sn-profit-lbl">🎯 المتوقّع الشهر</span>
+            <strong className={agg.expectedMonth < 0 ? "sn-neg" : ""}>{money(agg.expectedMonth)} <em>عملة</em></strong>
+          </div>
         </section>
+        <p className="sn-rate-hint" style={{ marginTop: -4, marginBottom: 10 }}>«النقدي» = ما حصّلته فعلاً. «المتوقّع» = يشمل ديون الزبائن غير المحصّلة مطروحاً منها مستحقات المورّد.</p>
         <div className="sn-mini-grid">
           <MiniStat label="مبيعات الشهر" val={`${money(agg.monthRevenue)} عملة`} />
-          <MiniStat label="إجمالي الأرباح" val={`${money(agg.allP)} عملة`} danger={agg.allP < 0} />
+          <MiniStat label="إجمالي الأرباح (نقدي)" val={`${money(agg.allP)} عملة`} danger={agg.allP < 0} />
+          <MiniStat label="🎯 الربح المتوقّع (الإجمالي)" val={`${money(agg.expectedAll)} عملة`} danger={agg.expectedAll < 0} />
           <MiniStat label="نصيب المندوبين" val={`${money(agg.agentsShare)} عملة`} danger={agg.agentsShare < 0} />
         </div>
         <div className="sn-mini-grid sn-mini-grid--2">
@@ -3903,11 +3966,11 @@ function Collapse({ title, count, children }) {
   const [open, setOpen] = useState(false);
   return (
     <section className="sn-block">
-      <button onClick={() => setOpen((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, background: "transparent", border: "none", color: "#e7ecf6", fontFamily: "inherit", fontWeight: 800, fontSize: 15, padding: 0, cursor: "pointer", textAlign: "right" }}>
-        <span>{title}{count != null ? ` (${count})` : ""}</span>
-        <span style={{ color: "#8b95ac", fontSize: 18 }}>{open ? "▾" : "◂"}</span>
+      <button className={"sn-coll-btn" + (open ? " sn-coll-open" : "")} onClick={() => setOpen((v) => !v)}>
+        <span className="sn-coll-title">{title}{count != null ? ` (${count})` : ""}</span>
+        <span className="sn-coll-arrow">{open ? "▾" : "❮"}</span>
       </button>
-      {open && <div style={{ marginTop: 12 }}>{children}</div>}
+      {open && <div className="sn-coll-body">{children}</div>}
     </section>
   );
 }
@@ -4670,8 +4733,14 @@ function RenewForm({ device, settings, countries = [], onSaveRate, onCancel, onC
     package: device.package || "",
   });
   const [debtManual, setDebtManual] = useState(false);
+  const prevDebtRaw = Number(device.debt) || 0;
+  const prevDebtCur = device.debtCurrency || device.currency || "MRU";
+  const [carryPrev, setCarryPrev] = useState(prevDebtRaw > 0);
   const rates = settings.rates;
   const toBaseLocal = (amt, cur) => (Number(amt) || 0) * (rates[cur] ?? 1);
+  const prevDebtInCur = Math.round((toBaseLocal(prevDebtRaw, prevDebtCur) / (rates[info.currency] || 1)) * 100) / 100;
+  const carriedAdd = carryPrev ? prevDebtInCur : 0;
+  const netDebtPreview = Math.round(((Number(info.debt) || 0) - (Number(info.credit) || 0) + carriedAdd) * 100) / 100;
 
   const worldCountry = info.country ? WORLD_COUNTRIES.find((c) => c.n === info.country) : null;
   const rateEntry = info.country ? countries.find((c) => c.name === info.country) : null;
@@ -4785,6 +4854,18 @@ function RenewForm({ device, settings, countries = [], onSaveRate, onCancel, onC
         </Field>
       </div>
 
+      {prevDebtRaw > 0 && (
+        <label className="sn-switch" style={{ marginTop: 4, marginBottom: 8 }}>
+          <input type="checkbox" checked={carryPrev} onChange={(e) => setCarryPrev(e.target.checked)} />
+          <span>➕ ترحيل الدين السابق غير المدفوع ({money(prevDebtInCur)} {symbolOf(info.currency)}) وإضافته إلى دين هذه العملية</span>
+        </label>
+      )}
+      {prevDebtRaw > 0 && carryPrev && (
+        <div className="sn-profit-preview" style={{ marginBottom: 10 }}>
+          💰 إجمالي دين الزبون بعد التجديد ≈ <strong className={netDebtPreview > 0 ? "sn-neg" : ""}>{money(netDebtPreview > 0 ? netDebtPreview : 0)} {symbolOf(info.currency)}</strong>
+        </div>
+      )}
+
       <div className="sn-supplier-box">
         <label className="sn-switch">
           <input type="checkbox" checked={info.costPaid} onChange={(e) => set("costPaid", e.target.checked)} />
@@ -4811,6 +4892,10 @@ function RenewForm({ device, settings, countries = [], onSaveRate, onCancel, onC
               ...info,
               durationDays: Number(info.durationDays) || settings.defaultDuration,
               cost: Math.round(costUSD * 100) / 100,
+              debt: netDebtPreview > 0 ? netDebtPreview : 0,
+              credit: netDebtPreview < 0 ? -netDebtPreview : 0,
+              debtCurrency: info.currency,
+              carriedPrevDebt: carriedAdd,
             })
           }
         >
@@ -5086,6 +5171,88 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
           </div>
         );
       })}
+    </Sheet>
+  );
+}
+
+// كشف حساب شخصي لكل زبون: ديون أجهزته + قيود يدوية (دين/رصيد) + رصيد جارٍ
+function CustomerAccountSheet({ device, data, settings, onClose, onAddDebt, onAddCredit, onDeleteEntry }) {
+  const rates = (settings && settings.rates) || { USDT: 430, FCFA: 3.6, MRU: 1 };
+  const tb = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
+  const key = personKey(device);
+  const devs = (data.devices || []).filter((d) => sameCustomer(d, device));
+  let devDebt = 0, devCredit = 0;
+  devs.forEach((d) => {
+    if (d.debt > 0) devDebt += tb(d.debt, d.debtCurrency || d.currency || "MRU");
+    if (d.credit > 0) devCredit += tb(d.credit, d.creditCurrency || d.currency || "MRU");
+  });
+  const entries = (data.customerLedger || []).filter((l) => l.key === key);
+  let manualDebit = 0, manualCredit = 0;
+  entries.forEach((l) => {
+    const v = tb(l.amount, l.currency || "MRU");
+    if (l.type === "debit") manualDebit += v; else manualCredit += v;
+  });
+  const net = Math.round((devDebt + manualDebit - devCredit - manualCredit) * 100) / 100;
+  const cur = device.currency || "MRU";
+  const sym = symbolOf(cur);
+  const toCur = (base) => Math.round((base / (rates[cur] || 1)) * 100) / 100;
+  const name = device.customerName || "بدون اسم";
+  const ask = (q, cb) => { const v = window.prompt(q); if (v != null && Number(v) > 0) { const n = window.prompt("ملاحظة (اختياري)") || ""; cb(Number(v), n); } };
+  const box = { background: "#111a36", border: "1px solid #243352", borderRadius: 14, padding: 14, marginBottom: 12 };
+  const row = { display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13.5, marginTop: 6 };
+  const head = { fontWeight: 900, marginBottom: 8, fontSize: 13.5 };
+  const statement = [
+    ...devs.filter((d) => d.debt > 0 || d.credit > 0).map((d) => ({
+      id: "dev_" + d.id, date: d.startDate || "", kind: d.debt > 0 ? "debt" : "credit",
+      label: (d.debt > 0 ? "دين جهاز" : "رصيد جهاز") + (d.accountNumber ? " (" + d.accountNumber + ")" : ""),
+      base: d.debt > 0 ? tb(d.debt, d.debtCurrency || d.currency || "MRU") : -tb(d.credit, d.creditCurrency || d.currency || "MRU"),
+      removable: false,
+    })),
+    ...entries.map((l) => ({
+      id: l.id, date: l.date || "", kind: l.type === "debit" ? "debt" : "credit",
+      label: (l.type === "debit" ? "➕ دين يدوي" : "💰 رصيد/دفعة") + (l.note ? " • " + l.note : ""),
+      base: (l.type === "debit" ? 1 : -1) * tb(l.amount, l.currency || "MRU"),
+      removable: true,
+    })),
+  ].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  return (
+    <Sheet title={`🧾 كشف حساب ${name}`} onClose={onClose}>
+      <div style={{ ...box, textAlign: "center", background: net > 0 ? "rgba(251,113,133,.12)" : net < 0 ? "rgba(52,211,153,.10)" : "#111a36", border: "1px solid " + (net > 0 ? "#5a2a3a" : net < 0 ? "#1f5a33" : "#243352") }}>
+        <div style={{ color: "#8b95ac", fontSize: 12 }}>الرصيد الحالي</div>
+        <div style={{ fontSize: 26, fontWeight: 900, color: net > 0 ? "#fb7185" : net < 0 ? "#34d399" : "#cdd6e6" }}>
+          {net > 0 ? `عليه ${money(toCur(net))}` : net < 0 ? `له ${money(toCur(-net))}` : "مُسوّى ✓"} <span style={{ fontSize: 13 }}>{sym}</span>
+        </div>
+        <div style={{ color: "#8b95ac", fontSize: 11.5, marginTop: 4 }}>{net > 0 ? "هذا ما يدين لك به الزبون" : net < 0 ? "هذا ما له عندك (رصيد)" : "الحساب متوازن"}</div>
+      </div>
+
+      <div style={box}>
+        <div style={head}>📊 التفصيل</div>
+        <div style={{ ...row, marginTop: 0 }}><span>ديون أجهزته ({devs.length})</span><strong className="sn-neg">{money(toCur(devDebt))} {sym}</strong></div>
+        {devCredit > 0 && <div style={row}><span>رصيد أجهزته</span><strong className="sn-pos">{money(toCur(devCredit))} {sym}</strong></div>}
+        {manualDebit > 0 && <div style={row}><span>ديون يدوية</span><strong className="sn-neg">{money(toCur(manualDebit))} {sym}</strong></div>}
+        {manualCredit > 0 && <div style={row}><span>أرصدة / دفعات</span><strong className="sn-pos">{money(toCur(manualCredit))} {sym}</strong></div>}
+        <div style={{ ...row, fontWeight: 800, borderTop: "1px solid #243352", paddingTop: 8, marginTop: 8 }}><span>الصافي</span><strong className={net > 0 ? "sn-neg" : "sn-pos"}>{net > 0 ? "عليه " : net < 0 ? "له " : ""}{money(toCur(Math.abs(net)))} {sym}</strong></div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <button onClick={() => ask(`كم دفع لك ${name}؟ (${sym})`, (v, n) => onAddCredit(v, n))} style={{ flex: 1, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>💰 دفعة / رصيد</button>
+        <button onClick={() => ask(`كم تزيد على دين ${name}؟ (${sym})`, (v, n) => onAddDebt(v, n))} style={{ flex: 1, background: "#3a2a16", color: "#fcd34d", border: "1px solid #5a4a2a", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➕ دين عليه</button>
+      </div>
+
+      <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>📒 كشف الحساب</h3>
+      {statement.length === 0 && <p className="sn-hint" style={{ textAlign: "center" }}>لا حركات بعد.</p>}
+      {statement.map((e) => (
+        <div key={e.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#111a36", border: "1px solid #243352", borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 13.5, color: e.kind === "debt" ? "#fb7185" : "#34d399" }}>{e.label}</div>
+            <div style={{ color: "#8b95ac", fontSize: 12 }}>{e.date ? fmtDate(e.date) : ""}</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <strong style={{ color: e.base >= 0 ? "#fb7185" : "#34d399", fontSize: 14 }}>{e.base >= 0 ? "+" : "−"}{money(toCur(Math.abs(e.base)))} {sym}</strong>
+            {e.removable && <button onClick={() => onDeleteEntry(e.id)} style={{ background: "transparent", border: "none", color: "#fb7185", fontSize: 16, cursor: "pointer" }}>🗑️</button>}
+          </div>
+        </div>
+      ))}
     </Sheet>
   );
 }
@@ -7210,6 +7377,20 @@ const CSS = `
 .sn-toast{position:fixed;bottom:96px;inset-inline:0;margin:0 auto;width:fit-content;max-width:90%;background:var(--elevated);color:var(--text);border:1px solid var(--border);padding:11px 20px;border-radius:30px;font-size:13.5px;z-index:80;box-shadow:0 8px 24px rgba(0,0,0,.4);animation:sn-up .25s ease}
 .sn-undo{position:fixed;bottom:140px;inset-inline:0;margin:0 auto;width:fit-content;max-width:92%;display:flex;align-items:center;gap:14px;background:var(--elevated);border:1px solid var(--border);padding:9px 9px 9px 16px;border-radius:30px;z-index:81;box-shadow:0 8px 24px rgba(0,0,0,.5);font-size:13px;animation:sn-up .25s ease}
 .sn-undo button{background:var(--accent);color:#fff;border:none;border-radius:20px;padding:8px 16px;font-family:inherit;font-weight:800;font-size:13px;cursor:pointer}
+
+/* ====== أزرار أقسام التقارير (قابلة للطي) — تصميم أنيق ====== */
+.sn-block{margin-bottom:10px}
+.sn-coll-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:linear-gradient(135deg, rgba(79,157,255,.10), rgba(124,92,255,.05));
+  border:1px solid var(--border); border-inline-start:3px solid var(--accent);
+  border-radius:14px; padding:14px 16px; font-family:inherit; font-weight:800; font-size:14.5px;
+  color:var(--text); cursor:pointer; text-align:right; transition:transform .12s ease, background .15s ease}
+.sn-coll-btn:active{transform:scale(.99)}
+.sn-coll-open{background:linear-gradient(135deg, rgba(79,157,255,.20), rgba(124,92,255,.09)); border-inline-start-color:#7c5cff}
+.sn-coll-title{flex:1; min-width:0}
+.sn-coll-arrow{color:var(--accent); font-size:13px; flex-shrink:0}
+.sn-coll-open .sn-coll-arrow{color:#a9ccff}
+.sn-coll-body{margin-top:12px; animation:sn-up .2s ease}
 
 /* ====== لوحة ألوان احترافية موحّدة لشارات البطاقة ====== */
 .sn-card-edited{display:block;font-size:10.5px;color:var(--muted);margin-top:6px;font-weight:600;opacity:.9}
