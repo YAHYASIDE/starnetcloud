@@ -1101,6 +1101,18 @@ function StarNetApp() {
               debtCurrency: info.currency,
               credit: Number(info.credit) || 0,
               creditCurrency: info.currency,
+              history: [
+                {
+                  startDate: x.startDate, endDate: x.endDate, durationDays: x.durationDays,
+                  totalCustomer: x.totalCustomer, amountPaid: x.amountPaid,
+                  debt: x.debt, debtCurrency: x.debtCurrency || x.currency,
+                  credit: x.credit, creditCurrency: x.creditCurrency || x.currency,
+                  cost: x.cost, costCurrency: x.costCurrency || "USDT", costPaid: x.costPaid,
+                  currency: x.currency, country: x.country, package: x.package,
+                  archivedAt: new Date().toISOString(),
+                },
+                ...(x.history || []),
+              ],
             }
           : x
       );
@@ -3356,9 +3368,9 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
             {telNum && <button className="sn-quick-btn" onClick={() => window.open("tel:" + telNum)} title="اتصال" aria-label="اتصال">📞</button>}
             {onWhats && <button className="sn-quick-btn" onClick={() => onWhats(d, "reminder")} title="واتساب" aria-label="واتساب">💬</button>}
             <button className={"sn-quick-btn" + (showProfit ? " sn-quick-on" : "")} onClick={() => setShowProfit(!showProfit)} title="الأرباح" aria-label="الأرباح">💰</button>
+            {onDelete && <HoldIcon icon="🗑️" title="حذف (اضغط مطوّلاً)" danger onHold={() => onDelete(d)} />}
             {onExport && <button className="sn-quick-btn" onClick={() => onExport(d)} title="PDF" aria-label="PDF">📄</button>}
             {onExportImage && <button className="sn-quick-btn" onClick={() => onExportImage(d)} title="صورة للواتساب" aria-label="صورة">🖼️</button>}
-            {onDelete && <HoldIcon icon="🗑️" title="حذف (اضغط مطوّلاً)" danger onHold={() => onDelete(d)} />}
           </div>
           <Countdown endDate={d.endDate} broken={d.broken} compact />
         </div>
@@ -3391,6 +3403,27 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
             </div>
           )}
           <p className="sn-rate-hint">يُحسب بسعر الصرف الحالي. الزبون يدفع بعملته والمورّد بالدولار.</p>
+          {(d.history && d.history.length > 0) && (
+            <div className="sn-hist-wrap">
+              <div className="sn-profit-head" style={{ marginTop: 12 }}>📜 العمليات السابقة ({d.history.length})</div>
+              {d.history.map((h, i) => (
+                <div className="sn-hist-row" key={i}>
+                  <div className="sn-hist-top">
+                    <span className="sn-hist-date">🗓️ {fmtDate(h.startDate)} ← {fmtDate(h.endDate)}</span>
+                    {h.package ? <span className="sn-hist-pkg">{h.package}</span> : null}
+                  </div>
+                  <div className="sn-hist-line">
+                    <span>المطلوب: <b>{money(h.totalCustomer)} {symbolOf(h.currency || "MRU")}</b></span>
+                    <span>دُفع: <b className="sn-pos">{money(h.amountPaid)}</b></span>
+                    {h.debt > 0 ? <span>دين: <b className="sn-neg">{money(h.debt)}</b></span> : null}
+                  </div>
+                  <div className="sn-hist-line">
+                    <span>التكلفة: <b>{money(h.cost)} {symbolOf(h.costCurrency || "USDT")}</b> {h.costPaid ? "✅ مدفوع" : "⏳ غير مدفوع"}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -7394,6 +7427,18 @@ const CSS = `
 
 /* ====== لوحة ألوان احترافية موحّدة لشارات البطاقة ====== */
 .sn-card-edited{display:block;font-size:10.5px;color:var(--muted);margin-top:6px;font-weight:600;opacity:.9}
+/* لوحة الكشف داخل البطاقة — أوضح وأكبر قليلاً */
+.sn-profit-panel{font-size:13px}
+.sn-profit-head{font-size:14px;font-weight:900}
+.sn-profit-total{font-size:13.5px;font-weight:800}
+/* العمليات السابقة (تاريخ الجهاز) */
+.sn-hist-wrap{margin-top:8px;border-top:1px solid var(--border);padding-top:8px}
+.sn-hist-row{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:10px;padding:9px 11px;margin-top:8px}
+.sn-hist-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px}
+.sn-hist-date{font-weight:800;font-size:12.5px;color:#c4cee0}
+.sn-hist-pkg{font-size:10.5px;color:#8b95ac;background:rgba(148,163,184,.12);border-radius:6px;padding:2px 7px}
+.sn-hist-line{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:#9aa6bd;margin-top:4px}
+.sn-hist-line b{color:#cdd6e6;font-weight:800}
 .sn-fin,.sn-dup-badge,.sn-origin-badge{font-size:10.5px;font-weight:700;border-radius:8px;padding:3px 8px}
 .sn-badge{font-size:10.5px;font-weight:700;border-radius:8px;padding:3px 9px}
 /* محايد — معلومات غير حرجة (رمادي مزرقّ هادئ) */
