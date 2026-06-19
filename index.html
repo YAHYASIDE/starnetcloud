@@ -3365,12 +3365,8 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
           <div className="sn-quick-acts" onClick={(e) => e.stopPropagation()}>
             {onEdit && <button className="sn-quick-btn" onClick={() => onEdit(d)} title="تعديل" aria-label="تعديل">✏️</button>}
             {onAccount && <button className="sn-quick-btn" onClick={() => onAccount(d)} title="كشف حساب الزبون" aria-label="كشف حساب">🧾</button>}
-            {telNum && <button className="sn-quick-btn" onClick={() => window.open("tel:" + telNum)} title="اتصال" aria-label="اتصال">📞</button>}
-            {onWhats && <button className="sn-quick-btn" onClick={() => onWhats(d, "reminder")} title="واتساب" aria-label="واتساب">💬</button>}
             <button className={"sn-quick-btn" + (showProfit ? " sn-quick-on" : "")} onClick={() => setShowProfit(!showProfit)} title="الأرباح" aria-label="الأرباح">💰</button>
-            {onDelete && <HoldIcon icon="🗑️" title="حذف (اضغط مطوّلاً)" danger onHold={() => onDelete(d)} />}
             {onExport && <button className="sn-quick-btn" onClick={() => onExport(d)} title="PDF" aria-label="PDF">📄</button>}
-            {onExportImage && <button className="sn-quick-btn" onClick={() => onExportImage(d)} title="صورة للواتساب" aria-label="صورة">🖼️</button>}
           </div>
           <Countdown endDate={d.endDate} broken={d.broken} compact />
         </div>
@@ -3491,6 +3487,8 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
             <HoldButton icon="🔄" label="تجديد" variant="green" hold onAct={() => onRenew(d)} />
             <HoldButton icon="💬" label="تأكيد" onAct={() => onWhats(d, "charged")} />
             <HoldButton icon="🧾" label="إيصال" variant="blue" onAct={() => onWhats(d, "receipt")} />
+            {telNum && <HoldButton icon="📞" label="اتصال" variant="green" onAct={() => window.open("tel:" + telNum)} />}
+            {onWhats && <HoldButton icon="💬" label="واتساب" variant="green" onAct={() => onWhats(d, "reminder")} />}
             <HoldButton icon="✏️" label="تعديل" hold onAct={() => onEdit(d)} />
             {onExport && <HoldButton icon="📄" label="PDF" variant="blue" onAct={() => onExport(d)} />}
             {onExportImage && <HoldButton icon="🖼️" label="صورة" variant="blue" onAct={() => onExportImage(d)} />}
@@ -4318,8 +4316,10 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
   }, [f.customerName, f.email, f.accountNumber, f.id, devices]);
 
   const endPreview = computeEnd(f.startDate, f.durationDays, settings);
+  const [pendingMode, setPendingMode] = useState(false);
 
   const submit = () => {
+    if (pendingMode && isNew && onSavePending) { onSavePending(f); return; }
     if (!f.customerName.trim()) return;
     onSave(
       {
@@ -4350,15 +4350,16 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
       {isNew && (
         <button
           type="button"
-          onClick={() => onSavePending && onSavePending(f)}
+          onClick={() => setPendingMode((v) => !v)}
           style={{
             width: "100%", marginBottom: 14, padding: "12px 14px", borderRadius: 12,
-            border: "1px solid #f0b429", background: "rgba(240,180,41,0.14)",
-            color: "#f0b429", fontWeight: 800, fontSize: 14.5, cursor: "pointer",
+            border: "1px solid #f0b429",
+            background: pendingMode ? "#f0b429" : "rgba(240,180,41,0.14)",
+            color: pendingMode ? "#1a1300" : "#f0b429", fontWeight: 800, fontSize: 14.5, cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
           }}
         >
-          📦 حفظ في «قيد التركيب» لإكماله لاحقاً
+          {pendingMode ? "📦 وضع «قيد التركيب» مُفعّل — اضغط «حفظ» بالأسفل" : "📦 وضع «قيد التركيب» (لإكماله لاحقاً)"}
         </button>
       )}
       <Field label="اسم العميل *">
@@ -4613,8 +4614,8 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
 
       <div className="sn-sheet-actions">
         <button className="sn-btn sn-btn--ghost" onClick={onCancel}>إلغاء</button>
-        <button className="sn-btn sn-btn--primary" onClick={submit} disabled={!f.customerName.trim()}>
-          {isNew ? "إضافة الجهاز" : "حفظ التعديلات"}
+        <button className="sn-btn sn-btn--primary" onClick={submit} disabled={!pendingMode && !f.customerName.trim()}>
+          {pendingMode ? "📦 حفظ في قيد التركيب" : (isNew ? "إضافة الجهاز" : "حفظ التعديلات")}
         </button>
       </div>
     </Sheet>
@@ -5234,12 +5235,14 @@ function CustomerAccountSheet({ device, data, settings, onClose, onAddDebt, onAd
   const box = { background: "#111a36", border: "1px solid #243352", borderRadius: 14, padding: 14, marginBottom: 12 };
   const row = { display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13.5, marginTop: 6 };
   const head = { fontWeight: 900, marginBottom: 8, fontSize: 13.5 };
+  const [openDev, setOpenDev] = useState(null);
   const statement = [
     ...devs.filter((d) => d.debt > 0 || d.credit > 0).map((d) => ({
       id: "dev_" + d.id, date: d.startDate || "", kind: d.debt > 0 ? "debt" : "credit",
       label: (d.debt > 0 ? "دين جهاز" : "رصيد جهاز") + (d.accountNumber ? " (" + d.accountNumber + ")" : ""),
       base: d.debt > 0 ? tb(d.debt, d.debtCurrency || d.currency || "MRU") : -tb(d.credit, d.creditCurrency || d.currency || "MRU"),
       removable: false,
+      dev: d,
     })),
     ...entries.map((l) => ({
       id: l.id, date: l.date || "", kind: l.type === "debit" ? "debt" : "credit",
@@ -5275,17 +5278,35 @@ function CustomerAccountSheet({ device, data, settings, onClose, onAddDebt, onAd
       <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>📒 كشف الحساب</h3>
       {statement.length === 0 && <p className="sn-hint" style={{ textAlign: "center" }}>لا حركات بعد.</p>}
       {statement.map((e) => (
-        <div key={e.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#111a36", border: "1px solid #243352", borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: 13.5, color: e.kind === "debt" ? "#fb7185" : "#34d399" }}>{e.label}</div>
-            <div style={{ color: "#8b95ac", fontSize: 12 }}>{e.date ? fmtDate(e.date) : ""}</div>
+        <div key={e.id} style={{ background: "#111a36", border: "1px solid #243352", borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}>
+          <div onClick={() => e.dev && setOpenDev(openDev === e.id ? null : e.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: e.dev ? "pointer" : "default" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 13.5, color: e.kind === "debt" ? "#fb7185" : "#34d399" }}>{e.label}{e.dev ? <span style={{ color: "#8b95ac", fontSize: 12, fontWeight: 600 }}> {openDev === e.id ? "▾" : "◂"}</span> : null}</div>
+              <div style={{ color: "#8b95ac", fontSize: 12 }}>{e.date ? fmtDate(e.date) : ""}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <strong style={{ color: e.base >= 0 ? "#fb7185" : "#34d399", fontSize: 14 }}>{e.base >= 0 ? "+" : "−"}{money(toCur(Math.abs(e.base)))} {sym}</strong>
+              {e.removable && <button onClick={(ev) => { ev.stopPropagation(); onDeleteEntry(e.id); }} style={{ background: "transparent", border: "none", color: "#fb7185", fontSize: 16, cursor: "pointer" }}>🗑️</button>}
+            </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <strong style={{ color: e.base >= 0 ? "#fb7185" : "#34d399", fontSize: 14 }}>{e.base >= 0 ? "+" : "−"}{money(toCur(Math.abs(e.base)))} {sym}</strong>
-            {e.removable && <button onClick={() => onDeleteEntry(e.id)} style={{ background: "transparent", border: "none", color: "#fb7185", fontSize: 16, cursor: "pointer" }}>🗑️</button>}
-          </div>
+          {e.dev && openDev === e.id && (
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #2a3550", fontSize: 12.5, color: "#c4cee0", display: "grid", gap: 4 }}>
+              {e.dev.accountNumber ? <div>🔢 الحساب: <b>{e.dev.accountNumber}</b></div> : null}
+              {e.dev.package ? <div>🗂️ الباقة: <b>{e.dev.package}</b></div> : null}
+              <div>🗓️ {fmtDate(e.dev.startDate)} ← {fmtDate(e.dev.endDate)}</div>
+              {e.dev.totalCustomer > 0 ? <div>المطلوب: <b>{money(e.dev.totalCustomer)} {symbolOf(e.dev.currency || "MRU")}</b> • دُفع: <b className="sn-pos">{money(e.dev.amountPaid)}</b></div> : null}
+              {e.dev.debt > 0 ? <div>الدين المتبقي: <b className="sn-neg">{money(e.dev.debt)} {symbolOf(e.dev.debtCurrency || e.dev.currency || "MRU")}</b></div> : null}
+              {e.dev.phone ? <div>📞 <b>{(e.dev.dialCode || "") + e.dev.phone}</b></div> : null}
+              {e.dev.email ? <div>✉️ <b style={{ direction: "ltr", display: "inline-block" }}>{e.dev.email}</b></div> : null}
+            </div>
+          )}
         </div>
       ))}
+
+      <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+        <button onClick={() => exportCustomerPDF(device, data, settings)} style={{ flex: 1, background: "#13294a", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>📄 كشف PDF</button>
+        <button onClick={() => exportCustomerImage(device, data, settings)} style={{ flex: 1, background: "#1f2a16", color: "#bce86a", border: "1px solid #3f5a2a", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>🖼️ صورة</button>
+      </div>
     </Sheet>
   );
 }
