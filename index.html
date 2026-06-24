@@ -3112,7 +3112,9 @@ function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkP
     if (filter === "dup") {
       return arr.sort((a, b) => norm(a.customerName).localeCompare(norm(b.customerName)));
     }
-    return arr.sort((a, b) => diffDays(t, a.endDate) - diffDays(t, b.endDate));
+    // الترتيب الافتراضي: الأحدث تعديلاً/إضافةً أولاً (الجهاز الذي عُدِّل يصعد للأعلى)
+    const rk = (d) => d.updatedAt || d.startDate || String(d.id || "");
+    return arr.sort((a, b) => String(rk(b)).localeCompare(String(rk(a))));
   }, [data, q, filter, counts]);
 
   const filters = [
@@ -3130,6 +3132,39 @@ function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkP
     ...[...new Set(data.devices.map((d) => d.tag).filter(Boolean))].map((t) => ["tag:" + t, "🏷️ " + t]),
     ...[...new Set(data.devices.map((d) => d.package).filter(Boolean))].map((p) => ["pkg:" + p, "🗂️ " + p]),
   ];
+
+  const _t = todayStr();
+  const _rk = (d) => d.updatedAt || d.startDate || String(d.id || "");
+  const rightList = [...list].sort((a, b) => diffDays(_t, a.endDate) - diffDays(_t, b.endDate));
+  const leftList = [...list].sort((a, b) => String(_rk(b)).localeCompare(String(_rk(a))));
+  const renderCard = (d) => (
+    <DeviceCard
+      key={d.id}
+      d={d}
+      agents={data.agents || []}
+      countries={data.countries || []}
+      balance={customerBalance(d, data, data.settings.rates)}
+      dupReasons={dupReasons(d)}
+      personColor={colorOf(d, data.personColors)}
+      personNumber={numberOf(d, data.personNumbers)}
+      toBase={toBase}
+      txs={data.transactions || []}
+      onEdit={onEdit}
+      onRenew={onRenew}
+      onDelete={onDelete}
+      onClearDebt={onClearDebt}
+      onMarkPaid={onMarkPaid}
+      onBroken={onBroken}
+      onUnbreak={onUnbreak}
+      onCopy={onCopy}
+      onExport={onExport}
+      onExportImage={onExportImage}
+      onArchive={onArchive}
+      onInstall={onInstall}
+      onWhats={onWhats}
+      onAccount={onAccount}
+    />
+  );
 
   return (
     <div className="sn-page">
@@ -3174,35 +3209,15 @@ function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkP
           }
         />
       ) : (
-        <div className="sn-dev-grid">
-        {list.map((d) => (
-          <DeviceCard
-            key={d.id}
-            d={d}
-            agents={data.agents || []}
-            countries={data.countries || []}
-            balance={customerBalance(d, data, data.settings.rates)}
-            dupReasons={dupReasons(d)}
-            personColor={colorOf(d, data.personColors)}
-            personNumber={numberOf(d, data.personNumbers)}
-            toBase={toBase}
-            txs={data.transactions || []}
-            onEdit={onEdit}
-            onRenew={onRenew}
-            onDelete={onDelete}
-            onClearDebt={onClearDebt}
-            onMarkPaid={onMarkPaid}
-            onBroken={onBroken}
-            onUnbreak={onUnbreak}
-            onCopy={onCopy}
-            onExport={onExport}
-            onExportImage={onExportImage}
-            onArchive={onArchive}
-            onInstall={onInstall}
-            onWhats={onWhats}
-            onAccount={onAccount}
-          />
-        ))}
+        <div className="sn-dev-2col">
+          <div className="sn-dev-col">
+            <div className="sn-col-h">⏳ قرب الانتهاء</div>
+            {rightList.map(renderCard)}
+          </div>
+          <div className="sn-dev-col">
+            <div className="sn-col-h">🕒 آخر تعديل</div>
+            {leftList.map(renderCard)}
+          </div>
         </div>
       )}
     </div>
@@ -3321,24 +3336,14 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
   };
   const shareCard = async () => {
     const lines = [
-      `⭐ معلومات الجهاز — STAR NET`,
-      `━━━━━━━━━━`,
-      `👤 ${d.customerName || "—"}${personNumber ? ` (#${personNumber})` : ""}`,
-      d.phone ? `📞 ${(d.dialCode || "") + d.phone}` : "",
-      d.email ? `📧 ${d.email}` : "",
-      d.accountNumber ? `🔢 رقم الحساب: ${d.accountNumber}` : "",
-      d.wifiPassword ? `🔑 كلمة السر: ${d.wifiPassword}` : "",
-      d.package ? `🗂️ الباقة: ${d.package}` : "",
-      d.startDate ? `📅 تاريخ الشحن: ${fmtDate(d.startDate)}` : "",
-      d.endDate ? `⏳ تاريخ الانتهاء: ${fmtDate(d.endDate)}` : "",
-      d.durationDays ? `🗓️ المدة: ${d.durationDays} يوم` : "",
-      agentName ? `🧑‍💼 المندوب: ${agentName}` : "",
-      d.installStatus ? `🚚 التركيب: ${d.installStatus}` : "",
-      d.totalCustomer > 0 ? `💵 شُحن بـ: ${money(d.totalCustomer)} ${symbolOf(d.currency)}` : "",
-      d.amountPaid > 0 ? `✅ المدفوع: ${money(d.amountPaid)} ${symbolOf(d.currency)}` : "",
-      d.debt > 0 ? `💰 الدين المتبقّي: ${money(d.debt)} ${symbolOf(d.debtCurrency || d.currency)}` : "",
-      d.credit > 0 ? `💳 له رصيد: ${money(d.credit)} ${symbolOf(d.creditCurrency || d.currency)}` : "",
-      d.cost > 0 ? `🏷️ التكلفة (للمورّد): ${money(d.cost)} ${symbolOf(d.costCurrency || "USDT")}` : "",
+      `معلومات الجهاز — STAR NET`,
+      `الاسم: ${d.customerName || "—"}`,
+      d.phone ? `الهاتف: ${(d.dialCode || "") + d.phone}` : "",
+      d.email ? `البريد: ${d.email}` : "",
+      d.accountNumber ? `رقم الحساب: ${d.accountNumber}` : "",
+      d.wifiPassword ? `كلمة السر: ${d.wifiPassword}` : "",
+      d.startDate ? `تاريخ الشحن: ${fmtDate(d.startDate)}` : "",
+      d.package ? `الباقة: ${d.package}` : "",
     ].filter(Boolean);
     const text = lines.join("\n");
     try {
@@ -3551,7 +3556,7 @@ function ProfitStatement({ data, toBase, agg }) {
   const [pickDay, setPickDay] = useState(todayStr());
   const rangeLabel = range === "day" ? `يوم ${fmtDate(pickDay)}` : (RANGES.find((r) => r[0] === range) || [, "الشهر"])[1];
   const stats = useMemo(() => {
-    let income = 0, expense = 0, profit = 0, count = 0;
+    let income = 0, expense = 0, profit = 0, count = 0, supPaid = 0;
     const start = new Date(); start.setHours(0, 0, 0, 0);
     if (range === "week") start.setDate(start.getDate() - 6);
     else if (range === "1m") start.setMonth(start.getMonth() - 1);
@@ -3567,16 +3572,19 @@ function ProfitStatement({ data, toBase, agg }) {
       if (!inR) return;
       const v = toBase(tr.amount, tr.currency);
       if (tr.isExpense) expense += v; else income += v;
+      if (tr.type === "دفع للمورّد") supPaid += v;
       profit += txProfit(tr, toBase);
       if (tr.type === "شحن") count++;
     });
-    return { income, expense, profit, count };
+    return { income, expense, profit, count, supPaid };
   }, [data.transactions, toBase, range, pickDay]);
-  const supPaidAll = useMemo(() => {
-    let p = 0;
-    (data.transactions || []).forEach((tr) => { if (tr.isExpense) p += toBase(tr.amount, tr.currency); });
-    return p;
-  }, [data.transactions, toBase]);
+  const supInfo = useMemo(() => {
+    let paid = 0;
+    (data.transactions || []).forEach((tr) => { if (tr.type === "دفع للمورّد") paid += toBase(tr.amount, tr.currency); });
+    let unpaidCount = 0;
+    (data.devices || []).forEach((d) => { if (!d.costPaid && Number(d.cost) > 0 && !d.broken) unpaidCount++; });
+    return { paid, unpaidCount };
+  }, [data.transactions, data.devices, toBase]);
   return (
     <section className="sn-block sn-ps-focus">
       <div className="sn-ps-hd">
@@ -3598,45 +3606,45 @@ function ProfitStatement({ data, toBase, agg }) {
       </div>
       <div className="sn-ps-3">
         <div><span>المبيعات</span><b>{money(stats.income)}</b></div>
-        <div><span>للمورّد</span><b className="sn-neg">{money(stats.expense)}</b></div>
+        <div><span>المصروفات</span><b className="sn-neg">{money(stats.expense)}</b></div>
         <div><span>الشحنات</span><b>{stats.count}</b></div>
       </div>
       {agg && (
-        <div className="sn-ps-twin" style={{ marginBottom: 8 }}>
-          <div className="sn-ps-twin-box sup">
-            <span>🏭 المورّد · طبيعي</span>
-            <b className="sn-neg">{money(stats.expense)}</b>
-            <small>مدفوع · {rangeLabel}</small>
-          </div>
-          <div className="sn-ps-twin-box sup">
-            <span>🏭 لو دُفع كل شيء</span>
-            <b className="sn-neg">{money(stats.expense + agg.supplierUnpaid)}</b>
-            <small>+ مستحق {money(agg.supplierUnpaid)}</small>
-          </div>
-        </div>
-      )}
-      {agg && (
         <>
-          <div className="sn-ps-sep">لقطة الآن (الإجمالي)</div>
+          <div className="sn-ps-sep">💵 ربحي</div>
           <div className="sn-ps-twin">
             <div className="sn-ps-twin-box">
-              <span>💵 الربح الحقيقي</span>
+              <span>الحقيقي</span>
               <b className={agg.allP < 0 ? "sn-neg" : "sn-pos"}>{money(agg.allP)}</b>
-              <small>المحصّل فعلاً</small>
+              <small>المحصّل − المدفوع</small>
             </div>
             <div className="sn-ps-twin-box exp">
               <span>🎯 لو دُفع كل شيء</span>
               <b className={agg.expectedAll < 0 ? "sn-neg" : "sn-pos"}>{money(agg.expectedAll)}</b>
-              <small>المتوقّع</small>
+              <small>كل البيع − كل التكلفة</small>
+            </div>
+          </div>
+          <div className="sn-ps-sep">🏭 كشف المورّد</div>
+          <div className="sn-ps-twin">
+            <div className="sn-ps-twin-box sup">
+              <span>مدفوع · {rangeLabel}</span>
+              <b className="sn-neg">{money(stats.supPaid)}</b>
+              <small>دفعات الفترة</small>
+            </div>
+            <div className="sn-ps-twin-box sup">
+              <span>مدفوع · الإجمالي</span>
+              <b className="sn-neg">{money(supInfo.paid)}</b>
+              <small>كل الدفعات</small>
             </div>
           </div>
           <div className="sn-ps-due">
-            <div><span>💰 ديون الزبائن (لك)</span><b className="sn-neg">{money(agg.debt)}</b></div>
-            <div><span>🏭 مستحق للمورّد (عليك)</span><b className="sn-neg">{money(agg.supplierUnpaid)}</b></div>
+            <div><span>🔴 مستحق المورّد (غير مدفوع)</span><b className="sn-neg">{money(agg.supplierUnpaid)}{supInfo.unpaidCount ? ` · ${supInfo.unpaidCount} جهاز` : ""}</b></div>
+            <div><span>📦 إجمالي تكلفته (لو دُفع كل شيء)</span><b className="sn-neg">{money(supInfo.paid + agg.supplierUnpaid)}</b></div>
           </div>
+          <div className="sn-ps-sep">📌 المستحقات الآن</div>
           <div className="sn-ps-due">
-            <div><span>🏭 مدفوع للمورّد (الإجمالي)</span><b className="sn-neg">{money(supPaidAll)}</b></div>
-            <div><span>🏭 لو دُفع كل شيء (الإجمالي)</span><b className="sn-neg">{money(supPaidAll + agg.supplierUnpaid)}</b></div>
+            <div><span>💰 ديون الزبائن (لك)</span><b className="sn-neg">{money(agg.debt)}</b></div>
+            <div><span>🏭 مستحق المورّد (عليك)</span><b className="sn-neg">{money(agg.supplierUnpaid)}</b></div>
           </div>
           <div className="sn-ps-sep">🧮 إغلاق اليوم</div>
           <div className="sn-ps-3">
@@ -7633,14 +7641,16 @@ const CSS = `
 .sn-ag-unpaid-r span{color:#9aa6bd}
 
 /* ====== عرض الأجهزة في عمودين جنباً إلى جنب ====== */
-.sn-dev-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;direction:rtl;grid-auto-flow:row}
-.sn-dev-grid > .sn-card{min-width:0}
-.sn-dev-grid .sn-card-top{flex-direction:column;align-items:stretch;gap:8px}
-.sn-dev-grid .sn-quick-acts{margin-inline-start:0}
-.sn-dev-grid .sn-grid2v{grid-template-columns:1fr}
+.sn-dev-2col{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;direction:rtl}
+.sn-dev-col{display:flex;flex-direction:column;gap:10px;min-width:0}
+.sn-col-h{background:#0e1530;border:1px solid var(--border);border-radius:9px;padding:6px 8px;font-size:11.5px;font-weight:800;color:#aeb8cc;text-align:center}
+.sn-dev-col > .sn-card{min-width:0}
+.sn-dev-col .sn-card-top{flex-direction:column;align-items:stretch;gap:8px}
+.sn-dev-col .sn-quick-acts{margin-inline-start:0}
+.sn-dev-col .sn-grid2v{grid-template-columns:1fr}
 @media (min-width:760px){
-  .sn-dev-grid .sn-card-top{flex-direction:row}
-  .sn-dev-grid .sn-grid2v{grid-template-columns:1fr 1fr}
+  .sn-dev-col .sn-card-top{flex-direction:row}
+  .sn-dev-col .sn-grid2v{grid-template-columns:1fr 1fr}
 }
 .sn-fin,.sn-dup-badge,.sn-origin-badge{font-size:10.5px;font-weight:700;border-radius:8px;padding:3px 8px}
 .sn-badge{font-size:10.5px;font-weight:700;border-radius:8px;padding:3px 9px}
