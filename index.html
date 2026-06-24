@@ -1972,6 +1972,34 @@ function StarNetApp() {
           <Settings
             settings={settings}
             onSave={updateSettings}
+            onClearTx={() =>
+              setConfirm({
+                text: "حذف كل المعاملات وكشوف الحسابات (يصبح سجل الأرباح = 0)؟\n\nالأجهزة وبياناتها وديونها تبقى كما هي. لا يمكن التراجع.",
+                onYes: () => {
+                  setData({ ...data, transactions: [], agentLedger: [], customerLedger: [], agentPayouts: [] });
+                  setConfirm(null);
+                  flash("تم حذف كل المعاملات");
+                },
+              })
+            }
+            onZeroAll={() =>
+              setConfirm({
+                text: "تصفير كامل: حذف المعاملات + تصفير كل ديون/مدفوعات/تكاليف الأجهزة حتى يصبح كل شيء 0؟\n\nتبقى أسماء الأجهزة وأرقامها وبريدها وحساباتها وباقاتها وتواريخها ومندوبها. لا يمكن التراجع.",
+                onYes: () => {
+                  setData({
+                    ...data,
+                    transactions: [], agentLedger: [], customerLedger: [], agentPayouts: [],
+                    devices: (data.devices || []).map((x) => ({
+                      ...x,
+                      totalCustomer: 0, amountPaid: 0, debt: 0, credit: 0,
+                      cost: 0, costLocal: 0, costPaid: false, history: [],
+                    })),
+                  });
+                  setConfirm(null);
+                  flash("تم تصفير كل شيء — الأجهزة محفوظة");
+                },
+              })
+            }
             onReset={() =>
               setConfirm({
                 text: "مسح كل البيانات نهائياً؟ لا يمكن التراجع.",
@@ -3146,7 +3174,8 @@ function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkP
           }
         />
       ) : (
-        list.map((d) => (
+        <div className="sn-dev-grid">
+        {list.map((d) => (
           <DeviceCard
             key={d.id}
             d={d}
@@ -3173,7 +3202,8 @@ function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkP
             onWhats={onWhats}
             onAccount={onAccount}
           />
-        ))
+        ))}
+        </div>
       )}
     </div>
   );
@@ -3277,6 +3307,7 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
   const renewCount = (txs || []).filter((t) => t.type === "تجديد" && personDevIds.has(t.deviceId)).length;
   const loyal = renewCount >= 5;
   const telNum = ((d.dialCode || "") + (d.phone || "")).replace(/\D/g, "");
+  const agentName = (agents.find((a) => a.id === d.agentId) || {}).name || "";
   const copyAll = () => {
     const lines = [
       `الاسم: ${d.customerName || "—"}`,
@@ -3290,26 +3321,35 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
   };
   const shareCard = async () => {
     const lines = [
-      `⭐ بطاقة زبون — STAR NET`,
+      `⭐ معلومات الجهاز — STAR NET`,
       `━━━━━━━━━━`,
       `👤 ${d.customerName || "—"}${personNumber ? ` (#${personNumber})` : ""}`,
-      d.phone ? `📞 ${d.phone}` : "",
+      d.phone ? `📞 ${(d.dialCode || "") + d.phone}` : "",
       d.email ? `📧 ${d.email}` : "",
-      d.accountNumber ? `🔢 الحساب: ${d.accountNumber}` : "",
+      d.accountNumber ? `🔢 رقم الحساب: ${d.accountNumber}` : "",
+      d.wifiPassword ? `🔑 كلمة السر: ${d.wifiPassword}` : "",
       d.package ? `🗂️ الباقة: ${d.package}` : "",
-      d.startDate ? `📅 ${fmtDate(d.startDate)} ← ${fmtDate(d.endDate)}` : "",
-      d.debt > 0 ? `💰 الدين: ${money(d.debt)} ${symbolOf(d.debtCurrency || d.currency)}` : "",
+      d.startDate ? `📅 تاريخ الشحن: ${fmtDate(d.startDate)}` : "",
+      d.endDate ? `⏳ تاريخ الانتهاء: ${fmtDate(d.endDate)}` : "",
+      d.durationDays ? `🗓️ المدة: ${d.durationDays} يوم` : "",
+      agentName ? `🧑‍💼 المندوب: ${agentName}` : "",
+      d.installStatus ? `🚚 التركيب: ${d.installStatus}` : "",
+      d.totalCustomer > 0 ? `💵 شُحن بـ: ${money(d.totalCustomer)} ${symbolOf(d.currency)}` : "",
+      d.amountPaid > 0 ? `✅ المدفوع: ${money(d.amountPaid)} ${symbolOf(d.currency)}` : "",
+      d.debt > 0 ? `💰 الدين المتبقّي: ${money(d.debt)} ${symbolOf(d.debtCurrency || d.currency)}` : "",
+      d.credit > 0 ? `💳 له رصيد: ${money(d.credit)} ${symbolOf(d.creditCurrency || d.currency)}` : "",
+      d.cost > 0 ? `🏷️ التكلفة (للمورّد): ${money(d.cost)} ${symbolOf(d.costCurrency || "USDT")}` : "",
     ].filter(Boolean);
     const text = lines.join("\n");
     try {
       if (navigator.share) { await navigator.share({ text }); return; }
     } catch (e) { /* fallback */ }
-    onCopy(text, "بطاقة الزبون (نُسخت)");
+    onCopy(text, "معلومات الجهاز (نُسخت)");
   };
   return (
     <div className={"sn-card sn-card--" + s.key + (riskNoPay ? " sn-card--risk" : "")} style={cardStyle}>
       {riskNoPay && <div className="sn-risk-banner">🚫 لم يسدّد الزبون وقارب الانتهاء — لا تدفع للمورّد!</div>}
-      <div className="sn-card-top" onClick={() => setOpen(!open)}>
+      <div className="sn-card-top sn-card-top--mini" onClick={() => setOpen(!open)}>
         <div className="sn-card-id">
           <span className="sn-card-name">
             <span className="sn-agent-dot" style={{ background: pc }} />
@@ -3319,56 +3359,20 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
               <span className="sn-dev-tag" style={{ borderColor: hexA(pc, 0.6), color: pc }}>جهاز {devNo}/{devCount}</span>
             )}
           </span>
-          <span className="sn-card-sub" dir="ltr">
-            {[(d.phone || "").trim(), (d.email || "").trim()].filter(Boolean).join(" · ") || "بدون رقم"}
-          </span>
-          <div className="sn-fin-badges">
-            <span className={"sn-badge sn-badge--" + s.key}>{s.label}</span>
-            {d.tag && <span className="sn-fin sn-tag-badge">🏷️ {d.tag}</span>}
-            {d.package && <span className="sn-fin sn-pkg-badge">🗂️ {d.package}</span>}
-            {d.installStatus && <span className={"sn-fin sn-inst-badge inst-" + (d.installStatus === "مكتمل" ? "done" : d.installStatus === "قيد التركيب" ? "prog" : "req")}>🚚 {d.installStatus}</span>}
-            {loyal && <span className="sn-fin sn-fin--good">🎁 يستحق خصم ({renewCount} تجديد)</span>}
-            {reliability && <span className={"sn-fin " + reliability.c}>{reliability.t}</span>}
-            {dupReasons.length > 0 && (
-              <span className="sn-dup-badge" title={"مكرّر: " + dupReasons.join("، ")}>🔁 مكرّر</span>
-            )}
-            {(d.originType || d.originNote) && (
-              <span className={"sn-origin-badge sn-origin-badge--" + (d.originType || "note")}>
-                {d.originType === "hadDebt" ? "⚠️ دين سابق" : d.originType === "clean" ? "✅ بلا دين" : "📌 ملاحظة"}
-              </span>
-            )}
-            {balance && balance.count > 1 && (
-              <span className={"sn-fin " + (balance.net > 0 ? "sn-fin--debt" : balance.net < 0 ? "sn-fin--cred" : "sn-fin--link")}>
-                👤 نفس الزبون ({balance.count})
-                {balance.net > 0 ? ` • عليه ${money(balance.net)}` : balance.net < 0 ? ` • له ${money(-balance.net)}` : ""}
-              </span>
-            )}
-            {d.debt > 0 && (
-              <span className="sn-fin sn-fin--debt" style={{ color: pc }}>💰 دين {money(d.debt)} {symbolOf(d.debtCurrency || d.currency)}</span>
-            )}
-            {d.debt > 0 && debtAgeDays(d) >= 7 && (
-              <span className="sn-fin sn-fin--late">⏳ متأخّر {debtAgeDays(d)}ي</span>
-            )}
-            {d.credit > 0 && (
-              <span className="sn-fin sn-fin--cred">💳 له {money(d.credit)} {symbolOf(d.creditCurrency || d.currency)}</span>
-            )}
-            {d.totalCustomer > 0 && !d.debt && <span className="sn-fin sn-fin--ok">✅ دفع كاملاً</span>}
-            {!d.costPaid && d.cost > 0 && !d.broken && (
-              <span className="sn-fin sn-fin--sup">🏷️ للمورّد {money(d.cost)}$</span>
-            )}
-            {d.costPaid && d.cost > 0 && <span className="sn-fin sn-fin--paid">🏷️ سُدّد للمورّد</span>}
-            {d.broken && <span className="sn-fin sn-fin--brk">🔧 معطّل</span>}
-          </div>
-          {d.updatedAt && <span className="sn-card-edited">🕒 آخر تعديل: {timeAgo(d.updatedAt)}</span>}
+          {d.email ? <span className="sn-card-sub" dir="ltr">{d.email}</span> : null}
+          {d.phone ? (
+            <button className="sn-card-phone" onClick={(e) => { e.stopPropagation(); if (telNum) window.open("https://wa.me/" + telNum); }} title="فتح واتساب">
+              📞 {d.phone}
+            </button>
+          ) : <span className="sn-card-sub">بدون رقم</span>}
+          {agentName ? <span className="sn-card-agent">👤 المندوب: <b>{agentName}</b></span> : null}
         </div>
         <div className="sn-card-status">
-          <div className="sn-quick-acts" onClick={(e) => e.stopPropagation()}>
-            {onEdit && <button className="sn-quick-btn" onClick={() => onEdit(d)} title="تعديل" aria-label="تعديل">✏️</button>}
+          <div className="sn-quick-acts sn-quick-acts--mini" onClick={(e) => e.stopPropagation()}>
+            <button className={"sn-quick-btn" + (showProfit ? " sn-quick-on" : "")} onClick={() => setShowProfit(!showProfit)} title="كشف ربح هذا الجهاز" aria-label="ربح الجهاز">💰</button>
             {onAccount && <button className="sn-quick-btn" onClick={() => onAccount(d)} title="كشف حساب الزبون" aria-label="كشف حساب">🧾</button>}
-            <button className={"sn-quick-btn" + (showProfit ? " sn-quick-on" : "")} onClick={() => setShowProfit(!showProfit)} title="الأرباح" aria-label="الأرباح">💰</button>
-            {onExport && <button className="sn-quick-btn" onClick={() => onExport(d)} title="PDF" aria-label="PDF">📄</button>}
+            {onWhats && <button className="sn-quick-btn" onClick={() => onWhats(d, "reminder")} title="تواصل واتساب" aria-label="واتساب">💬</button>}
           </div>
-          <Countdown endDate={d.endDate} broken={d.broken} compact />
         </div>
       </div>
 
@@ -3482,30 +3486,13 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
           )}
 
           <div className="sn-card-actions sn-card-actions--bar">
-            <HoldButton icon="📋" label="نسخ" variant="blue" onAct={copyAll} />
-            <HoldButton icon="📲" label="مشاركة" variant="blue" onAct={shareCard} />
+            <HoldButton icon="📋" label="معلومات" variant="blue" onAct={shareCard} />
             <HoldButton icon="🔄" label="تجديد" variant="green" hold onAct={() => onRenew(d)} />
             <HoldButton icon="💬" label="تأكيد" onAct={() => onWhats(d, "charged")} />
             <HoldButton icon="🧾" label="إيصال" variant="blue" onAct={() => onWhats(d, "receipt")} />
-            {telNum && <HoldButton icon="📞" label="اتصال" variant="green" onAct={() => window.open("tel:" + telNum)} />}
-            {onWhats && <HoldButton icon="💬" label="واتساب" variant="green" onAct={() => onWhats(d, "reminder")} />}
             <HoldButton icon="✏️" label="تعديل" hold onAct={() => onEdit(d)} />
             {onExport && <HoldButton icon="📄" label="PDF" variant="blue" onAct={() => onExport(d)} />}
             {onExportImage && <HoldButton icon="🖼️" label="صورة" variant="blue" onAct={() => onExportImage(d)} />}
-            {!compact && (
-              <HoldButton icon="📲" label="مشاركة" variant="blue" onAct={() => {
-                const txt = [
-                  `👤 ${d.customerName || "—"}`,
-                  d.phone ? `📞 ${(d.dialCode || "") + d.phone}` : "",
-                  d.email ? `✉️ ${d.email}` : "",
-                  d.accountNumber ? `🔢 ${d.accountNumber}` : "",
-                  `📅 ${fmtDate(d.startDate)} ← ${fmtDate(d.endDate)}`,
-                  d.package ? `🗂️ ${d.package}` : "",
-                ].filter(Boolean).join("\n");
-                if (navigator.share) navigator.share({ text: txt }).catch(() => {});
-                else if (navigator.clipboard) { navigator.clipboard.writeText(txt); alert("نُسخت بطاقة الزبون ✅"); }
-              }} />
-            )}
             {!compact && onArchive && (
               <HoldButton icon={d.archived ? "📤" : "🧊"} label={d.archived ? "استرجاع" : "أرشفة"} hold onAct={() => onArchive(d)} />
             )}
@@ -3557,66 +3544,117 @@ function Row({ k, v, danger, onCopy, copyVal, copyLabel }) {
 /* ============================================================
    التقارير
    ============================================================ */
-function ProfitStatement({ data, toBase }) {
-  const MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
-  const now = new Date();
-  const [mode, setMode] = useState("month");
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth());
+function ProfitStatement({ data, toBase, agg }) {
+  const fmtToday = fmtDate(todayStr());
+  const RANGES = [["today", "اليوم"], ["week", "أسبوع"], ["1m", "شهر"], ["3m", "3 أشهر"], ["6m", "6 أشهر"], ["1y", "سنة"]];
+  const [range, setRange] = useState("1m");
+  const [pickDay, setPickDay] = useState(todayStr());
+  const rangeLabel = range === "day" ? `يوم ${fmtDate(pickDay)}` : (RANGES.find((r) => r[0] === range) || [, "الشهر"])[1];
   const stats = useMemo(() => {
     let income = 0, expense = 0, profit = 0, count = 0;
-    const monthly = Array(12).fill(0);
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    if (range === "week") start.setDate(start.getDate() - 6);
+    else if (range === "1m") start.setMonth(start.getMonth() - 1);
+    else if (range === "3m") start.setMonth(start.getMonth() - 3);
+    else if (range === "6m") start.setMonth(start.getMonth() - 6);
+    else if (range === "1y") start.setFullYear(start.getFullYear() - 1);
+    const end = new Date(); end.setHours(23, 59, 59, 999);
     (data.transactions || []).forEach((tr) => {
       if (!tr.date) return;
-      const d = parseDate(tr.date);
-      const ty = d.getFullYear(), tm = d.getMonth();
-      const inP = mode === "month" ? ty === year && tm === month : ty === year;
-      if (ty === year) monthly[tm] += txProfit(tr, toBase);
-      if (!inP) return;
+      let inR;
+      if (range === "day") inR = tr.date === pickDay;
+      else { const d = parseDate(tr.date); inR = d >= start && d <= end; }
+      if (!inR) return;
       const v = toBase(tr.amount, tr.currency);
       if (tr.isExpense) expense += v; else income += v;
       profit += txProfit(tr, toBase);
       if (tr.type === "شحن") count++;
     });
-    return { income, expense, profit, count, monthly };
-  }, [data.transactions, toBase, mode, year, month]);
-  const prev = () => {
-    if (mode === "month") { if (month === 0) { setMonth(11); setYear((y) => y - 1); } else setMonth((m) => m - 1); }
-    else setYear((y) => y - 1);
-  };
-  const next = () => {
-    if (mode === "month") { if (month === 11) { setMonth(0); setYear((y) => y + 1); } else setMonth((m) => m + 1); }
-    else setYear((y) => y + 1);
-  };
-  const maxM = Math.max(1, ...stats.monthly.map((x) => Math.abs(x)));
+    return { income, expense, profit, count };
+  }, [data.transactions, toBase, range, pickDay]);
+  const supPaidAll = useMemo(() => {
+    let p = 0;
+    (data.transactions || []).forEach((tr) => { if (tr.isExpense) p += toBase(tr.amount, tr.currency); });
+    return p;
+  }, [data.transactions, toBase]);
   return (
-    <section className="sn-block">
-      <h2>📑 كشف الأرباح</h2>
-      <div className="sn-seg">
-        <button className={mode === "month" ? "is-on" : ""} onClick={() => setMode("month")}>شهري</button>
-        <button className={mode === "year" ? "is-on" : ""} onClick={() => setMode("year")}>سنوي</button>
+    <section className="sn-block sn-ps-focus">
+      <div className="sn-ps-hd">
+        <h2>📑 كشف الأرباح</h2>
+        <span className="sn-ps-today">📅 {fmtToday}</span>
       </div>
-      <div className="sn-period-nav">
-        <button onClick={prev} aria-label="السابق">‹</button>
-        <span>{mode === "month" ? `${MONTHS[month]} ${year}` : `سنة ${year}`}</span>
-        <button onClick={next} aria-label="التالي">›</button>
+      <div className="sn-range-btns">
+        {RANGES.map(([k, l]) => (
+          <button key={k} className={range === k ? "is-on" : ""} onClick={() => setRange(k)}>{l}</button>
+        ))}
+        <button className={range === "day" ? "is-on" : ""} onClick={() => setRange("day")}>📅 يوم</button>
       </div>
-      <div className="sn-ps-profit">
-        <span>صافي الربح</span>
-        <strong className={stats.profit < 0 ? "sn-neg" : ""}>{money(stats.profit)} عملة</strong>
+      {range === "day" && (
+        <input type="date" className="sn-range-date" value={pickDay} onChange={(e) => setPickDay(e.target.value)} />
+      )}
+      <div className="sn-ps-period">
+        <span>صافي الربح · {rangeLabel}</span>
+        <strong className={stats.profit < 0 ? "sn-neg" : "sn-pos"}>{money(stats.profit)} عملة</strong>
       </div>
-      <div className="sn-ps-row"><span>المبيعات (الدخل)</span><strong>{money(stats.income)} عملة</strong></div>
-      <div className="sn-ps-row"><span>المصروفات (للمورّد)</span><strong>{money(stats.expense)} عملة</strong></div>
-      <div className="sn-ps-row"><span>عدد عمليات الشحن</span><strong>{stats.count}</strong></div>
-      {mode === "year" && (
-        <div className="sn-year-bars">
-          {stats.monthly.map((v, i) => (
-            <div className="sn-ybar" key={i} title={`${MONTHS[i]}: ${money(v)}`}>
-              <div className={"sn-ybar-fill" + (v < 0 ? " neg" : "")} style={{ height: Math.max(2, Math.round((Math.abs(v) / maxM) * 56)) }} />
-              <span>{i + 1}</span>
-            </div>
-          ))}
+      <div className="sn-ps-3">
+        <div><span>المبيعات</span><b>{money(stats.income)}</b></div>
+        <div><span>للمورّد</span><b className="sn-neg">{money(stats.expense)}</b></div>
+        <div><span>الشحنات</span><b>{stats.count}</b></div>
+      </div>
+      {agg && (
+        <div className="sn-ps-twin" style={{ marginBottom: 8 }}>
+          <div className="sn-ps-twin-box sup">
+            <span>🏭 المورّد · طبيعي</span>
+            <b className="sn-neg">{money(stats.expense)}</b>
+            <small>مدفوع · {rangeLabel}</small>
+          </div>
+          <div className="sn-ps-twin-box sup">
+            <span>🏭 لو دُفع كل شيء</span>
+            <b className="sn-neg">{money(stats.expense + agg.supplierUnpaid)}</b>
+            <small>+ مستحق {money(agg.supplierUnpaid)}</small>
+          </div>
         </div>
+      )}
+      {agg && (
+        <>
+          <div className="sn-ps-sep">لقطة الآن (الإجمالي)</div>
+          <div className="sn-ps-twin">
+            <div className="sn-ps-twin-box">
+              <span>💵 الربح الحقيقي</span>
+              <b className={agg.allP < 0 ? "sn-neg" : "sn-pos"}>{money(agg.allP)}</b>
+              <small>المحصّل فعلاً</small>
+            </div>
+            <div className="sn-ps-twin-box exp">
+              <span>🎯 لو دُفع كل شيء</span>
+              <b className={agg.expectedAll < 0 ? "sn-neg" : "sn-pos"}>{money(agg.expectedAll)}</b>
+              <small>المتوقّع</small>
+            </div>
+          </div>
+          <div className="sn-ps-due">
+            <div><span>💰 ديون الزبائن (لك)</span><b className="sn-neg">{money(agg.debt)}</b></div>
+            <div><span>🏭 مستحق للمورّد (عليك)</span><b className="sn-neg">{money(agg.supplierUnpaid)}</b></div>
+          </div>
+          <div className="sn-ps-due">
+            <div><span>🏭 مدفوع للمورّد (الإجمالي)</span><b className="sn-neg">{money(supPaidAll)}</b></div>
+            <div><span>🏭 لو دُفع كل شيء (الإجمالي)</span><b className="sn-neg">{money(supPaidAll + agg.supplierUnpaid)}</b></div>
+          </div>
+          <div className="sn-ps-sep">🧮 إغلاق اليوم</div>
+          <div className="sn-ps-3">
+            <div><span>دخل اليوم</span><b className="sn-pos">{money(agg.dayIncome)}</b></div>
+            <div><span>مصروفات اليوم</span><b className="sn-neg">{money(agg.dayExpense)}</b></div>
+            <div><span>صافي اليوم</span><b className={agg.dayP < 0 ? "sn-neg" : "sn-pos"}>{money(agg.dayP)}</b></div>
+          </div>
+          <div className="sn-ps-sep">📅 آخر ٧ أيام</div>
+          <div className="sn-ps-3">
+            <div><span>المبيعات</span><b>{money(agg.weekSales)}</b></div>
+            <div><span>الأرباح</span><b className={agg.weekProfit < 0 ? "sn-neg" : "sn-pos"}>{money(agg.weekProfit)}</b></div>
+            <div><span>العمليات</span><b>{agg.weekCount}</b></div>
+          </div>
+          <div className="sn-ps-due">
+            <div><span>🧾 صافي ربحي وحدي</span><b className={agg.myNet < 0 ? "sn-neg" : "sn-pos"}>{money(agg.myNet)}</b></div>
+            <div><span>💼 نصيب المندوبين</span><b className={agg.agentsShare < 0 ? "sn-neg" : ""}>{money(agg.agentsShare)}</b></div>
+          </div>
+        </>
       )}
     </section>
   );
@@ -3632,7 +3670,7 @@ function Reports({ data, toBase, settings }) {
     let dayP = 0, monthP = 0, allP = 0, monthRevenue = 0, debt = 0, supplierUnpaid = 0;
     let storeP = 0, chargeP = 0, agentChargeP = 0, organicChargeP = 0;
     let usdChargeAll = 0, usdChargeMonth = 0, usdOwed = 0;
-    let dayIncome = 0, dayExpense = 0, weekProfit = 0, weekSales = 0, weekCount = 0;
+    let dayIncome = 0, dayExpense = 0, monthExpense = 0, weekProfit = 0, weekSales = 0, weekCount = 0;
     const weekStart = addDays(t, -6);
     const byCur = {};
     const byCurExp = {};
@@ -3671,6 +3709,7 @@ function Reports({ data, toBase, settings }) {
           byCur[tr.currency] = (byCur[tr.currency] || 0) + (Number(tr.amount) || 0);
         } else {
           byCurExp[tr.currency] = (byCurExp[tr.currency] || 0) + (Number(tr.amount) || 0);
+          monthExpense += toBase(tr.amount, tr.currency);
         }
       }
     });
@@ -3699,7 +3738,7 @@ function Reports({ data, toBase, settings }) {
       .map((d) => ({ d, p: devProfit[d.id] }))
       .sort((a, b) => a.p - b.p);
     const lossTotal = lossDevices.reduce((s, x) => s + Math.min(0, x.p), 0);
-    return { dayP, monthP, allP, monthRevenue, debt, supplierUnpaid, expectedAll, expectedDay, expectedMonth, byCur, byCurExp, agentsShare, myNet, storeP, chargeP, agentChargeP, organicChargeP, usdChargeAll, usdChargeMonth, usdOwed, devProfit, lossDevices, lossTotal, dayIncome, dayExpense, weekProfit, weekSales, weekCount };
+    return { dayP, monthP, allP, monthRevenue, debt, supplierUnpaid, expectedAll, expectedDay, expectedMonth, byCur, byCurExp, agentsShare, myNet, storeP, chargeP, agentChargeP, organicChargeP, usdChargeAll, usdChargeMonth, usdOwed, devProfit, lossDevices, lossTotal, dayIncome, dayExpense, monthExpense, weekProfit, weekSales, weekCount };
   }, [data, toBase, t]);
 
   // أفضل الزبائن + إحصاء الدول + مقارنة الشهر بالماضي
@@ -3797,11 +3836,9 @@ function Reports({ data, toBase, settings }) {
 
   return (
     <div className="sn-page">
-      <Collapse title="💰 كشف الأرباح">
-        <ProfitStatement data={data} toBase={toBase} />
-      </Collapse>
+      <ProfitStatement data={data} toBase={toBase} agg={agg} />
 
-      <Collapse title="📈 الأرباح (اليوم / الشهر / التفصيل)">
+      <Collapse title="📈 أرباح أخرى (اليوم / الشهر / التفصيل)">
         <section className="sn-profit-grid" style={{ marginBottom: 12 }}>
           <div className="sn-profit sn-profit--day">
             <span className="sn-profit-lbl">أرباح اليوم (نقدي)</span>
@@ -3860,19 +3897,6 @@ function Reports({ data, toBase, settings }) {
           <MiniStat label="دولار مستحق لم يُدفع بعد" val={`${money(agg.usdOwed)} $`} danger={agg.usdOwed > 0} />
         </div>
         <p className="sn-hint">«دولار استُعمل في الشحن» = ما دفعته فعلاً للمورّد بالدولار. «مستحق لم يُدفع» = أجهزة تسلّفت شحنها ولم تسدّد للمورّد بعد.</p>
-      </Collapse>
-
-      <Collapse title="🧮 إغلاق اليوم وملخص الأسبوع">
-        <div className="sn-close-grid" style={{ marginBottom: 10 }}>
-          <div className="sn-close-c"><span>دخل اليوم</span><strong className="sn-pos">{money(agg.dayIncome)}</strong></div>
-          <div className="sn-close-c"><span>مصروفات اليوم</span><strong className="sn-neg">{money(agg.dayExpense)}</strong></div>
-          <div className="sn-close-c"><span>صافي اليوم</span><strong className={agg.dayP < 0 ? "sn-neg" : "sn-pos"}>{money(agg.dayP)}</strong></div>
-        </div>
-        <div className="sn-close-grid">
-          <div className="sn-close-c"><span>مبيعات ٧ أيام</span><strong>{money(agg.weekSales)}</strong></div>
-          <div className="sn-close-c"><span>أرباح ٧ أيام</span><strong className={agg.weekProfit < 0 ? "sn-neg" : "sn-pos"}>{money(agg.weekProfit)}</strong></div>
-          <div className="sn-close-c"><span>عمليات ٧ أيام</span><strong>{agg.weekCount}</strong></div>
-        </div>
       </Collapse>
 
       <Collapse title="🧾 صافي ووضعنا المالي">
@@ -4955,7 +4979,28 @@ function agentProfit(agentId, data, toBase) {
   return Math.round(profit * 100) / 100;
 }
 
-// الحساب الجاري للمندوب: نصيبه من الأرباح + الأرصدة المضافة − (المدفوع + المسحوب)
+// ربح المندوب لو دُفع كل شيء = (كامل سعر الزبون) − (كامل التكلفة) لأجهزته
+function agentProfitExpected(agentId, data, toBase) {
+  let profit = 0;
+  (data.devices || []).forEach((d) => {
+    if (d.agentId !== agentId || d.broken) return;
+    const full = toBase(Number(d.totalCustomer) || 0, d.currency || "MRU");
+    const cost = toBase(Number(d.cost) || 0, d.costCurrency || "USDT");
+    profit += full - cost;
+  });
+  return Math.round(profit * 100) / 100;
+}
+
+// غير المدفوع لأجهزة المندوب، مجمّعاً بالعملة: ديون الزبائن (لك) ومستحق المورّد (عليك)
+function agentUnpaid(agentId, data) {
+  const custDebt = {}, supDue = {};
+  (data.devices || []).forEach((d) => {
+    if (d.agentId !== agentId || d.broken) return;
+    if (Number(d.debt) > 0) { const c = d.debtCurrency || d.currency || "MRU"; custDebt[c] = (custDebt[c] || 0) + Number(d.debt); }
+    if (!d.costPaid && Number(d.cost) > 0) { const c = d.costCurrency || "USDT"; supDue[c] = (supDue[c] || 0) + Number(d.cost); }
+  });
+  return { custDebt, supDue };
+}
 function agentBalance(agent, data, toBase) {
   const profit = agentProfit(agent.id, data, toBase);
   const rawShare = Math.round(profit * (Number(agent.percent) || 0)) / 100;
@@ -4984,6 +5029,7 @@ function Agents({ data, toBase, settings, onAddAgent, onEditAgent, onDeleteAgent
   const agents = data.agents || [];
   const payouts = data.agentPayouts || [];
   const [showRep, setShowRep] = useState(false);
+  const [unpaidOpen, setUnpaidOpen] = useState(null);
   const devProfit = {};
   (data.transactions || []).forEach((tr) => { if (tr.deviceId) devProfit[tr.deviceId] = (devProfit[tr.deviceId] || 0) + txProfit(tr, toBase); });
   // تقارير المندوبين: أرباح/خسائر أجهزة المندوبين، اليوم والشهر
@@ -5049,6 +5095,11 @@ function Agents({ data, toBase, settings, onAddAgent, onEditAgent, onDeleteAgent
           const lossCount = myDevs.filter((d) => (d.id in devProfit) && devProfit[d.id] <= 0).length;
           const bal = agentBalance(a, data, toBase);
           const rem = agentRemaining(a, data, (settings && settings.rates) || { USDT: 430, FCFA: 3.6, MRU: 1 });
+          const expected = agentProfitExpected(a.id, data, toBase);
+          const up = agentUnpaid(a.id, data);
+          const upCust = Object.entries(up.custDebt);
+          const upSup = Object.entries(up.supDue);
+          const oweAgent = bal.balance;
           return (
             <div className="sn-agent-card" key={a.id}>
               <div className="sn-agent-top">
@@ -5064,8 +5115,35 @@ function Agents({ data, toBase, settings, onAddAgent, onEditAgent, onDeleteAgent
                   <strong className={share < 0 ? "sn-neg" : ""}>{money(share)} عملة</strong>
                 </div>
               </div>
+              <div className="sn-ag-twin">
+                <div className="sn-ag-twin-box">
+                  <span>💵 ربح حقيقي</span>
+                  <b className={profit < 0 ? "sn-neg" : "sn-pos"}>{money(profit)}</b>
+                </div>
+                <div className="sn-ag-twin-box exp">
+                  <span>🎯 لو دُفع كل شيء</span>
+                  <b className={expected < 0 ? "sn-neg" : "sn-pos"}>{money(expected)}</b>
+                </div>
+                <button className={"sn-ag-twin-box up" + (unpaidOpen === a.id ? " is-on" : "")} onClick={() => setUnpaidOpen(unpaidOpen === a.id ? null : a.id)}>
+                  <span>🔴 غير مدفوع</span>
+                  <b>{upCust.length + upSup.length + (oweAgent > 0 ? 1 : 0)} بند</b>
+                </button>
+              </div>
+              {unpaidOpen === a.id && (
+                <div className="sn-ag-unpaid">
+                  <div className="sn-ag-unpaid-h">💰 ديون الزبائن (لك):</div>
+                  {upCust.length ? upCust.map(([c, v]) => (
+                    <div className="sn-ag-unpaid-r" key={"c" + c}><span>زبائن</span><b className="sn-neg">{money(v)} {symbolOf(c)}</b></div>
+                  )) : <div className="sn-ag-unpaid-r sn-hint">لا ديون</div>}
+                  <div className="sn-ag-unpaid-h">🏭 مستحق المورّد (عليك):</div>
+                  {upSup.length ? upSup.map(([c, v]) => (
+                    <div className="sn-ag-unpaid-r" key={"s" + c}><span>مورّد</span><b className="sn-neg">{money(v)} {symbolOf(c)}</b></div>
+                  )) : <div className="sn-ag-unpaid-r sn-hint">لا مستحقّات</div>}
+                  <div className="sn-ag-unpaid-h">🤝 المندوب:</div>
+                  <div className="sn-ag-unpaid-r"><span>{oweAgent > 0 ? "عليك له" : oweAgent < 0 ? "له عليك (سحب زائد)" : "مُسوّى"}</span><b className={oweAgent > 0 ? "sn-neg" : "sn-pos"}>{money(Math.abs(oweAgent))} عملة</b></div>
+                </div>
+              )}
               <div className="sn-agent-figs">
-                <span className={profit < 0 ? "sn-neg" : "sn-pos"}>💰 ربحي معه: {money(profit)} عملة</span>
                 {lossCount > 0 && <span className="sn-neg">📉 خسائري معه: {money(Math.round(-agentLoss))} عملة ({lossCount} جهاز)</span>}
                 <span className={rem > 0 ? "sn-neg" : "sn-pos"}>🧾 المتبقّي: {rem > 0 ? `عليه ${money(rem)}` : rem < 0 ? `له ${money(-rem)}` : "مُسوّى ✓"} FCFA</span>
               </div>
@@ -6621,7 +6699,7 @@ function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, 
 /* ============================================================
    الإعدادات
    ============================================================ */
-function Settings({ settings, onSave, onReset }) {
+function Settings({ settings, onSave, onReset, onClearTx, onZeroAll }) {
   const [s, setS] = useState(settings);
   const set = (k, v) => setS((p) => ({ ...p, [k]: v }));
   const setRate = (cur, v) =>
@@ -6753,6 +6831,21 @@ function Settings({ settings, onSave, onReset }) {
       </button>
 
       <p className="sn-hint" style={{ textAlign: "center" }}>سجل العملات، دفتر العملاء، Excel، النسخ الاحتياطي، وسلة المحذوفات — كلها الآن في القائمة الجانبية (زر ☰ بالأعلى).</p>
+
+      <div style={{ background: "rgba(248,113,113,.05)", border: "1px solid rgba(248,113,113,.2)", borderRadius: 14, padding: 12, marginBottom: 12 }}>
+        <div style={{ fontWeight: 800, fontSize: 13.5, color: "#fca5a5", marginBottom: 4 }}>♻️ بداية جديدة (مع إبقاء الأجهزة)</div>
+        <p className="sn-hint" style={{ margin: "0 0 10px" }}>صفّر الأرباح والحسابات دون فقدان أجهزتك وزبائنك.</p>
+        {onClearTx && (
+          <button className="sn-btn sn-full" style={{ background: "#3a2a16", color: "#fcd34d", border: "1px solid #5a4a2a", marginBottom: 8 }} onClick={onClearTx}>
+            🧹 حذف كل المعاملات فقط (تبقى ديون الأجهزة)
+          </button>
+        )}
+        {onZeroAll && (
+          <button className="sn-btn sn-full" style={{ background: "#3a1620", color: "#fca5a5", border: "1px solid #5a2a3a" }} onClick={onZeroAll}>
+            🧨 تصفير كامل ليصبح كل شيء 0 (إبقاء أسماء/أرقام الأجهزة)
+          </button>
+        )}
+      </div>
 
       <button className="sn-btn sn-btn--danger sn-full" onClick={onReset}>
         🗑️ مسح كل البيانات
@@ -7460,6 +7553,95 @@ const CSS = `
 .sn-hist-pkg{font-size:10.5px;color:#8b95ac;background:rgba(148,163,184,.12);border-radius:6px;padding:2px 7px}
 .sn-hist-line{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:#9aa6bd;margin-top:4px}
 .sn-hist-line b{color:#cdd6e6;font-weight:800}
+
+/* ====== بطاقة مصغّرة: اسم/بريد/رقم/مندوب + 3 أزرار ====== */
+.sn-card-top--mini{padding:11px 13px;align-items:center}
+.sn-card-phone{background:rgba(52,211,153,.12);color:#6ee7b7;border:1px solid rgba(52,211,153,.28);border-radius:8px;padding:4px 11px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;margin-top:5px;width:fit-content;direction:ltr}
+.sn-card-phone:active{transform:scale(.97)}
+.sn-card-agent{display:block;font-size:11.5px;color:#9aa6bd;margin-top:6px;font-weight:600}
+.sn-card-agent b{color:#cdd6e6}
+.sn-quick-acts--mini{width:auto;grid-template-columns:repeat(3,1fr);gap:6px}
+
+/* ====== إبراز كشف الأرباح (مصغّر للهاتف) ====== */
+.sn-ps-focus{background:linear-gradient(135deg, rgba(79,157,255,.10), rgba(124,92,255,.05));border:1px solid var(--border);border-radius:14px;padding:12px;margin-bottom:12px}
+.sn-ps-focus h2{margin:0 0 10px;font-size:16px}
+.sn-ps-twin{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.sn-ps-twin-box{background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.22);border-radius:11px;padding:9px 10px;display:flex;flex-direction:column;gap:1px;text-align:center}
+.sn-ps-twin-box.exp{background:rgba(79,157,255,.08);border-color:rgba(79,157,255,.22)}
+.sn-ps-twin-box.sup{background:rgba(248,113,113,.08);border-color:rgba(248,113,113,.22)}
+.sn-ps-twin-box span{font-size:11px;color:#aeb8cc;font-weight:700}
+.sn-ps-twin-box b{font-size:17px;font-weight:900}
+.sn-ps-twin-box small{font-size:9.5px;color:#8b95ac}
+.sn-ps-tbl{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:12.5px}
+.sn-ps-tbl th{color:#8b95ac;font-size:11px;font-weight:700;padding:4px 6px;text-align:center}
+.sn-ps-tbl td{padding:6px;text-align:center;font-weight:800;border-top:1px solid var(--border)}
+.sn-ps-tbl td:first-child{text-align:right;color:#c4cee0;font-weight:700}
+.sn-ps-due{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px}
+.sn-ps-due > div{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+.sn-ps-due span{font-size:10.5px;color:#9aa6bd}
+.sn-ps-due b{font-size:14px;font-weight:900}
+.sn-ps-focus .sn-ps-profit{padding:9px 11px}
+.sn-ps-focus .sn-ps-row{font-size:12.5px}
+.sn-ps-focus .sn-seg{margin-bottom:8px}
+
+/* ====== تصغير عام للهاتف (وضع مؤقّت للعمل، يُضبط لاحقاً للابتوب) ====== */
+.sn-page{padding:12px 11px;gap:11px}
+.sn-block{margin-bottom:8px}
+.sn-coll-btn{padding:11px 13px;font-size:13.5px}
+.sn-mini-grid,.sn-profit-grid{gap:8px}
+.sn-ps-focus{padding:11px}
+.sn-ps-focus h2{font-size:15px;margin-bottom:8px}
+.sn-ps-twin-box b{font-size:15px}
+.sn-ps-tbl{font-size:12px}
+.sn-ps-tbl td{padding:5px}
+.sn-card-top--mini{padding:9px 11px}
+.sn-card-name{font-size:14px}
+.sn-card-phone{font-size:12px;padding:3px 9px}
+.sn-quick-btn{width:34px;height:34px;font-size:16px}
+.sn-fin,.sn-badge{font-size:10px;padding:2px 7px}
+
+/* ====== شريط التاريخ + أزرار الفترات ====== */
+.sn-ps-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.sn-ps-hd h2{margin:0;font-size:15px}
+.sn-ps-today{font-size:11.5px;color:#9aa6bd;font-weight:700;white-space:nowrap}
+.sn-range-btns{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+.sn-range-btns button{flex:1 1 auto;min-width:52px;background:var(--surface2);color:#c4cee0;border:1px solid var(--border);border-radius:9px;padding:6px 8px;font-family:inherit;font-weight:700;font-size:11.5px;cursor:pointer}
+.sn-range-btns button.is-on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.sn-range-date{width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:9px;padding:8px;font-family:inherit}
+.sn-ps-period{display:flex;align-items:center;justify-content:space-between;gap:8px;background:rgba(52,211,153,.10);border:1px solid rgba(52,211,153,.24);border-radius:11px;padding:10px 12px;margin-bottom:8px}
+.sn-ps-period span{font-size:12px;color:#aeb8cc;font-weight:700}
+.sn-ps-period strong{font-size:18px;font-weight:900}
+.sn-ps-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px}
+.sn-ps-3 > div{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:9px;padding:7px 6px;text-align:center}
+.sn-ps-3 span{display:block;font-size:10px;color:#9aa6bd;margin-bottom:2px}
+.sn-ps-3 b{font-size:13px;font-weight:900}
+.sn-ps-sep{text-align:center;font-size:10.5px;color:#8b95ac;margin:7px 0 6px;font-weight:700}
+
+/* ====== ربح المندوب: حقيقي / متوقّع / غير مدفوع ====== */
+.sn-ag-twin{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin:8px 0}
+.sn-ag-twin-box{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:8px 6px;text-align:center;font-family:inherit}
+.sn-ag-twin-box span{display:block;font-size:9.5px;color:#9aa6bd;margin-bottom:3px}
+.sn-ag-twin-box b{font-size:13px;font-weight:900}
+.sn-ag-twin-box.exp{background:rgba(79,157,255,.07);border-color:rgba(79,157,255,.2)}
+.sn-ag-twin-box.up{background:rgba(248,113,113,.07);border-color:rgba(248,113,113,.22);cursor:pointer}
+.sn-ag-twin-box.up.is-on{background:rgba(248,113,113,.16)}
+.sn-ag-twin-box.up b{color:#fca5a5}
+.sn-ag-unpaid{background:rgba(248,113,113,.05);border:1px solid rgba(248,113,113,.18);border-radius:10px;padding:8px 10px;margin-bottom:8px}
+.sn-ag-unpaid-h{font-size:11px;font-weight:800;color:#cbd5e6;margin:6px 0 3px}
+.sn-ag-unpaid-h:first-child{margin-top:0}
+.sn-ag-unpaid-r{display:flex;align-items:center;justify-content:space-between;font-size:12px;padding:2px 0}
+.sn-ag-unpaid-r span{color:#9aa6bd}
+
+/* ====== عرض الأجهزة في عمودين جنباً إلى جنب ====== */
+.sn-dev-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;direction:rtl;grid-auto-flow:row}
+.sn-dev-grid > .sn-card{min-width:0}
+.sn-dev-grid .sn-card-top{flex-direction:column;align-items:stretch;gap:8px}
+.sn-dev-grid .sn-quick-acts{margin-inline-start:0}
+.sn-dev-grid .sn-grid2v{grid-template-columns:1fr}
+@media (min-width:760px){
+  .sn-dev-grid .sn-card-top{flex-direction:row}
+  .sn-dev-grid .sn-grid2v{grid-template-columns:1fr 1fr}
+}
 .sn-fin,.sn-dup-badge,.sn-origin-badge{font-size:10.5px;font-weight:700;border-radius:8px;padding:3px 8px}
 .sn-badge{font-size:10.5px;font-weight:700;border-radius:8px;padding:3px 9px}
 /* محايد — معلومات غير حرجة (رمادي مزرقّ هادئ) */
