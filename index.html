@@ -3611,10 +3611,10 @@ function ProfitStatement({ data, toBase, agg }) {
       </div>
       {agg && (
         <>
-          <div className="sn-ps-sep">💵 ربحي</div>
+          <div className="sn-ps-sep">📊 الإجمالي (كل الوقت)</div>
           <div className="sn-ps-twin">
             <div className="sn-ps-twin-box">
-              <span>الحقيقي</span>
+              <span>💵 الربح الحقيقي</span>
               <b className={agg.allP < 0 ? "sn-neg" : "sn-pos"}>{money(agg.allP)}</b>
               <small>المحصّل − المدفوع</small>
             </div>
@@ -3624,42 +3624,12 @@ function ProfitStatement({ data, toBase, agg }) {
               <small>كل البيع − كل التكلفة</small>
             </div>
           </div>
-          <div className="sn-ps-sep">🏭 كشف المورّد</div>
-          <div className="sn-ps-twin">
-            <div className="sn-ps-twin-box sup">
-              <span>مدفوع · {rangeLabel}</span>
-              <b className="sn-neg">{money(stats.supPaid)}</b>
-              <small>دفعات الفترة</small>
-            </div>
-            <div className="sn-ps-twin-box sup">
-              <span>مدفوع · الإجمالي</span>
-              <b className="sn-neg">{money(supInfo.paid)}</b>
-              <small>كل الدفعات</small>
-            </div>
-          </div>
-          <div className="sn-ps-due">
-            <div><span>🔴 مستحق المورّد (غير مدفوع)</span><b className="sn-neg">{money(agg.supplierUnpaid)}{supInfo.unpaidCount ? ` · ${supInfo.unpaidCount} جهاز` : ""}</b></div>
-            <div><span>📦 إجمالي تكلفته (لو دُفع كل شيء)</span><b className="sn-neg">{money(supInfo.paid + agg.supplierUnpaid)}</b></div>
-          </div>
-          <div className="sn-ps-sep">📌 المستحقات الآن</div>
           <div className="sn-ps-due">
             <div><span>💰 ديون الزبائن (لك)</span><b className="sn-neg">{money(agg.debt)}</b></div>
-            <div><span>🏭 مستحق المورّد (عليك)</span><b className="sn-neg">{money(agg.supplierUnpaid)}</b></div>
-          </div>
-          <div className="sn-ps-sep">🧮 إغلاق اليوم</div>
-          <div className="sn-ps-3">
-            <div><span>دخل اليوم</span><b className="sn-pos">{money(agg.dayIncome)}</b></div>
-            <div><span>مصروفات اليوم</span><b className="sn-neg">{money(agg.dayExpense)}</b></div>
-            <div><span>صافي اليوم</span><b className={agg.dayP < 0 ? "sn-neg" : "sn-pos"}>{money(agg.dayP)}</b></div>
-          </div>
-          <div className="sn-ps-sep">📅 آخر ٧ أيام</div>
-          <div className="sn-ps-3">
-            <div><span>المبيعات</span><b>{money(agg.weekSales)}</b></div>
-            <div><span>الأرباح</span><b className={agg.weekProfit < 0 ? "sn-neg" : "sn-pos"}>{money(agg.weekProfit)}</b></div>
-            <div><span>العمليات</span><b>{agg.weekCount}</b></div>
+            <div><span>🏭 مستحق المورّد (عليك)</span><b className="sn-neg">{money(agg.supplierUnpaid)}{supInfo.unpaidCount ? ` · ${supInfo.unpaidCount}` : ""}</b></div>
           </div>
           <div className="sn-ps-due">
-            <div><span>🧾 صافي ربحي وحدي</span><b className={agg.myNet < 0 ? "sn-neg" : "sn-pos"}>{money(agg.myNet)}</b></div>
+            <div><span>🧾 صافي ربحي (بعد المندوبين)</span><b className={agg.myNet < 0 ? "sn-neg" : "sn-pos"}>{money(agg.myNet)}</b></div>
             <div><span>💼 نصيب المندوبين</span><b className={agg.agentsShare < 0 ? "sn-neg" : ""}>{money(agg.agentsShare)}</b></div>
           </div>
         </>
