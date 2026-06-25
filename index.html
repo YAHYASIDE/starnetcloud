@@ -2470,9 +2470,14 @@ function exportAgentPDF(agent, data, settings) {
   const agentNetFull = combinedFull * (percent / 100);
   const realized = custCollected - supPaid;
   const agentNetNow = realized * (percent / 100);
-  const paidByAgent = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0) + (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
-  const liab = toF(custDebt);
-  const remaining = liab - paidByAgent;
+  const credits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "credit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const debits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const liab = toF(custDebt) + credits;
+  const paidByAgent = debits;
+  const owesMe = liab - paidByAgent;
+  const shareRemaining = toF(agentNetNow) - payouts;
+  const remaining = owesMe - shareRemaining;
   const custRows = devs.map((d) => `<tr><td>${esc(d.customerName || "—")}</td><td>${esc(d.accountNumber || "—")}</td><td class="ltr">${f(tb(d.debt, d.debtCurrency || d.currency || "MRU"))}</td></tr>`).join("");
   const html = `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2500,12 +2505,18 @@ th{background:#f4f6fb}
 <button class="btn" onclick="window.print()">🖨️ حفظ PDF / طباعة</button>
 <h1>كشف حساب المندوب: ${esc(agent.name)}</h1>
 <div class="sub">${esc(settings.businessName)} ⭐ — ${fmtDate(todayStr())} — النسبة ${percent}% — كل المبالغ بـ FCFA</div>
-<div class="bal ${remaining > 0 ? "bal-d" : remaining < 0 ? "bal-c" : ""}">${remaining > 0 ? "المتبقّي على المندوب: " + money(remaining) + " FCFA" : remaining < 0 ? "له (دفع زيادة): " + money(-remaining) + " FCFA" : "الحساب مُسوّى ✓"}</div>
+<div class="bal ${remaining > 0 ? "bal-d" : remaining < 0 ? "bal-c" : ""}">${remaining > 0 ? "المتبقّي على المندوب: " + money(remaining) + " FCFA" : remaining < 0 ? "مستحقّ له (نصيبه): " + money(-remaining) + " FCFA" : "الحساب مُسوّى ✓"}</div>
 <h2>حسابه معي</h2>
 <table>
 <tr><td class="k">📌 إجمالي ما عليه (ديون زبائنه)</td><td class="v">${money(liab)} FCFA</td></tr>
 <tr><td class="k">💰 ما دفعه لي</td><td class="v pos">${money(paidByAgent)} FCFA</td></tr>
-<tr><td class="k">🔻 المتبقّي عليه</td><td class="v ${remaining > 0 ? "neg" : "pos"}">${money(remaining)} FCFA</td></tr>
+<tr><td class="k">🔻 المتبقّي عليه (دينه لي)</td><td class="v ${owesMe > 0 ? "neg" : "pos"}">${money(owesMe)} FCFA</td></tr>
+</table>
+<h2>نصيب المندوب</h2>
+<table>
+<tr><td class="k">🟢 نصيبه من المُحصّل</td><td class="v">${money(toF(agentNetNow))} FCFA</td></tr>
+<tr><td class="k">✅ دُفع له</td><td class="v pos">${money(payouts)} FCFA</td></tr>
+<tr><td class="k">💵 المتبقّي له (ادفعه له)</td><td class="v pos">${money(Math.max(0, shareRemaining))} FCFA</td></tr>
 </table>
 <h2>أرباح أجهزته</h2>
 <table>
@@ -5271,8 +5282,11 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
   const debits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const liab = toF(custDebt) + credits;
-  const paidByAgent = payouts + debits;
-  const remaining = liab - paidByAgent;
+  const paidByAgent = debits;                     // ما دفعه لي فعلاً (دفعات منه) FCFA
+  const owesMe = liab - paidByAgent;              // المتبقّي عليه (دينه لي) FCFA
+  const shareF = toF(agentNetNow);               // نصيبه من المُحصّل بالـFCFA
+  const shareRemaining = shareF - payouts;        // المتبقّي له من نصيبه (FCFA)
+  const remaining = owesMe - shareRemaining;      // الصافي: موجب=عليه ، سالب=له
   const payments = [
     ...(data.agentPayouts || []).filter((p) => p.agentId === agent.id).map((p) => ({ id: p.id, kind: "payout", amount: Number(p.amount) || 0, date: p.date, note: "تسليم" })),
     ...(data.agentLedger || []).filter((l) => l.agentId === agent.id).map((l) => ({ id: l.id, kind: l.type, amount: Number(l.amount) || 0, date: l.date, note: l.note || "" })),
@@ -5290,7 +5304,7 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
         <div style={{ fontSize: 26, fontWeight: 900, color: remaining > 0 ? negCol : posCol }}>
           {remaining > 0 ? `عليه ${money(remaining)}` : remaining < 0 ? `له ${money(-remaining)}` : "مُسوّى ✓"} <span style={{ fontSize: 13 }}>FCFA</span>
         </div>
-        <div style={{ color: "#8b95ac", fontSize: 11.5, marginTop: 4 }}>{remaining > 0 ? "هذا ما يدين لك به المندوب" : remaining < 0 ? "دفع لك أكثر من المطلوب" : "الحساب متوازن"}</div>
+        <div style={{ color: "#8b95ac", fontSize: 11.5, marginTop: 4 }}>{remaining > 0 ? "هذا ما يدين لك به المندوب" : remaining < 0 ? "مستحقّ له (نصيبه لم يُدفع بعد)" : "الحساب متوازن"}</div>
       </div>
 
       <div style={box}>
@@ -5299,7 +5313,7 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
         {credits > 0 && <div style={row}><span>➕ زيادات يدوية عليه</span><strong>{money(credits)} FCFA</strong></div>}
         <div style={{ ...row, fontWeight: 800 }}><span>📌 إجمالي المطلوب منه</span><strong>{money(liab)} FCFA</strong></div>
         <div style={row}><span>💰 ما دفعه لي</span><strong className="sn-pos">{money(paidByAgent)} FCFA</strong></div>
-        <div style={row}><span>🔻 المتبقّي عليه</span><strong className={remaining > 0 ? "sn-neg" : "sn-pos"}>{money(remaining)} FCFA</strong></div>
+        <div style={row}><span>🔻 المتبقّي عليه (دينه لي)</span><strong className={owesMe > 0 ? "sn-neg" : "sn-pos"}>{money(owesMe)} FCFA</strong></div>
       </div>
 
       <div style={box}>
@@ -5307,7 +5321,9 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
           <span style={head}>📈 نصيب المندوب</span>
           <span style={{ color: "#8b95ac", fontSize: 13 }}>{showProfit ? "▾ تفاصيل" : "◂ تفاصيل"}</span>
         </button>
-        <div style={{ ...row, marginTop: 8, fontWeight: 800 }}><span>🟢 نصيبه من المُحصّل (ادفعه له)</span><strong className={agentNetNow < 0 ? "sn-neg" : "sn-pos"}>{f(agentNetNow)} FCFA</strong></div>
+        <div style={{ ...row, marginTop: 8, fontWeight: 800 }}><span>🟢 نصيبه من المُحصّل</span><strong className={shareF < 0 ? "sn-neg" : "sn-pos"}>{money(shareF)} FCFA</strong></div>
+        {payouts > 0 && <div style={row}><span>✅ دُفع له</span><strong className="sn-pos">{money(payouts)} FCFA</strong></div>}
+        <div style={{ ...row, fontWeight: 800, borderTop: payouts > 0 ? "1px dashed #2a3550" : "none", paddingTop: payouts > 0 ? 8 : 0 }}><span>💵 المتبقّي له (ادفعه له)</span><strong className={shareRemaining > 0 ? "sn-pos" : "sn-pos"}>{money(Math.max(0, shareRemaining))} FCFA</strong></div>
         {showProfit && (
           <>
             <div style={{ ...row, borderTop: "1px dashed #2a3550", paddingTop: 8, marginTop: 8 }}><span>🤝 ربحنا معاً (لو دُفع كل شيء)</span><strong className={combinedFull < 0 ? "sn-neg" : ""}>{f(combinedFull)} FCFA</strong></div>
@@ -5356,7 +5372,7 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
 
       <button onClick={() => exportAgentPDF(agent, data, settings)} style={{ width: "100%", marginBottom: 10, background: "#13294a", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>📄 كشف PDF (للإرسال)</button>
 
-      <button onClick={() => { const def = String(Math.max(0, toF(agentNetNow))); const v = window.prompt(`كم تدفع للمندوب ${agent.name}؟ (FCFA)`, def); if (v != null && Number(v) > 0) onSettle(Number(v)); }} style={{ width: "100%", marginBottom: 10, background: "#13294a", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>💵 ادفع للمندوب نصيبه</button>
+      <button onClick={() => { const def = String(Math.max(0, shareRemaining)); const v = window.prompt(`كم تدفع للمندوب ${agent.name}؟ (FCFA)`, def); if (v != null && Number(v) > 0) onSettle(Number(v)); }} style={{ width: "100%", marginBottom: 10, background: "#13294a", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>💵 ادفع للمندوب نصيبه</button>
 
       <button onClick={() => setPayOpen(!payOpen)} style={{ width: "100%", marginBottom: payOpen ? 8 : 10, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>💰 دفعة من المندوب {payOpen ? "▾" : "◂"}</button>
       {payOpen && (
@@ -5392,7 +5408,7 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
         return (
           <div key={e.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#111a36", border: "1px solid #243352", borderRadius: 12, padding: "10px 12px", marginBottom: 8 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 800, fontSize: 13.5, color: isPlus ? negCol : posCol }}>{isPlus ? "➕ زيادة عليه" : e.kind === "payout" ? "💵 تسليم" : "💰 دفعة منه"}</div>
+              <div style={{ fontWeight: 800, fontSize: 13.5, color: isPlus ? negCol : posCol }}>{isPlus ? "➕ زيادة عليه" : e.kind === "payout" ? "💵 دُفع له (نصيبه)" : "💰 دفعة منه"}</div>
               <div style={{ color: "#8b95ac", fontSize: 12 }}>{fmtDate(e.date)}{e.note ? ` • ${e.note}` : ""}</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
