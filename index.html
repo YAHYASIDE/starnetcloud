@@ -1238,6 +1238,28 @@ function StarNetApp() {
     setCollecting(null);
   }
 
+  // تحصيل دين جهاز كامل عبر المندوب (المندوب سلّم مبلغ هذا الجهاز)
+  function collectDeviceFull(device) {
+    const amt = Number(device.debt) || 0;
+    if (amt <= 0) { flash("لا دين على هذا الجهاز"); return; }
+    snapshot("تحصيل عبر المندوب");
+    setData((d) => {
+      const tx = {
+        id: uid(), deviceId: device.id, customerName: device.customerName, date: todayStr(),
+        amount: amt, currency: device.debtCurrency || device.currency || "MRU",
+        method: "عبر المندوب", type: "تسديد دين", proof: "",
+      };
+      const newPaid = Math.round(((Number(device.amountPaid) || 0) + amt) * 100) / 100;
+      return {
+        ...d,
+        transactions: [tx, ...d.transactions],
+        devices: d.devices.map((x) => (x.id === device.id ? { ...x, debt: 0, amountPaid: newPaid } : x)),
+      };
+    });
+    flash(`تم تحصيل دين «${device.customerName || "الجهاز"}» عبر المندوب ✅`);
+    playSound("payment");
+  }
+
   function markCostPaid(device, paid = true) {
     setData((d) => {
       let transactions = [...d.transactions];
@@ -2181,6 +2203,7 @@ function StarNetApp() {
           onAddCredit={(amt, note) => addAgentLedger(accountAgent, "credit", amt, note)}
           onWithdraw={(amt, note) => addAgentLedger(accountAgent, "debit", amt, note)}
           onSettle={(amt) => settleAgent(accountAgent, amt)}
+          onCollectDevice={collectDeviceFull}
           onReset={() => resetAgentAccount(accountAgent)}
           onDeleteEntry={deleteAgentLedger}
         />
@@ -5219,7 +5242,11 @@ function Agents({ data, toBase, settings, onAddAgent, onEditAgent, onDeleteAgent
 }
 
 // شاشة الحساب الجاري للمندوب: رصيد، إضافة، سحب، وكشف حساب
-function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit, onWithdraw, onSettle, onReset, onDeleteEntry }) {
+function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit, onWithdraw, onSettle, onCollectDevice, onReset, onDeleteEntry }) {
+  const [showDevs, setShowDevs] = useState(false);
+  const [showSup, setShowSup] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
+  const [showProfit, setShowProfit] = useState(false);
   const rates = (settings && settings.rates) || { USDT: 430, FCFA: 3.6, MRU: 1 };
   const tb = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
   const toF = (b) => Math.round(b / (rates.FCFA || 3.6));
@@ -5276,31 +5303,52 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
       </div>
 
       <div style={box}>
-        <div style={head}>📈 أرباح أجهزته (FCFA)</div>
-        <div style={{ ...row, marginTop: 0 }}><span>🤝 ربحنا معاً (لو دُفع كل شيء)</span><strong className={combinedFull < 0 ? "sn-neg" : ""}>{f(combinedFull)} FCFA</strong></div>
-        <div style={row}><span>🟢 صافي ربحي أنا (بعد الطرفين)</span><strong className={myNetFull < 0 ? "sn-neg" : "sn-pos"}>{f(myNetFull)} FCFA</strong></div>
-        <div style={row}><span>🟢 صافي ربح المندوب (بعد الطرفين)</span><strong className={agentNetFull < 0 ? "sn-neg" : "sn-pos"}>{f(agentNetFull)} FCFA</strong></div>
-        <div style={{ ...row, borderTop: "1px dashed #2a3550", paddingTop: 8, marginTop: 4 }}><span>⏳ صافي ربح المندوب حالياً (المُحصّل فعلاً)</span><strong className={agentNetNow < 0 ? "sn-neg" : "sn-pos"}>{f(agentNetNow)} FCFA</strong></div>
+        <button onClick={() => setShowProfit(!showProfit)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "transparent", border: "none", color: "inherit", fontFamily: "inherit", cursor: "pointer", padding: 0 }}>
+          <span style={head}>📈 نصيب المندوب</span>
+          <span style={{ color: "#8b95ac", fontSize: 13 }}>{showProfit ? "▾ تفاصيل" : "◂ تفاصيل"}</span>
+        </button>
+        <div style={{ ...row, marginTop: 8, fontWeight: 800 }}><span>🟢 نصيبه من المُحصّل (ادفعه له)</span><strong className={agentNetNow < 0 ? "sn-neg" : "sn-pos"}>{f(agentNetNow)} FCFA</strong></div>
+        {showProfit && (
+          <>
+            <div style={{ ...row, borderTop: "1px dashed #2a3550", paddingTop: 8, marginTop: 8 }}><span>🤝 ربحنا معاً (لو دُفع كل شيء)</span><strong className={combinedFull < 0 ? "sn-neg" : ""}>{f(combinedFull)} FCFA</strong></div>
+            <div style={row}><span>🟢 نصيبه لو دُفع كل شيء</span><strong className={agentNetFull < 0 ? "sn-neg" : "sn-pos"}>{f(agentNetFull)} FCFA</strong></div>
+            <div style={row}><span>🟢 صافي ربحي أنا</span><strong className={myNetFull < 0 ? "sn-neg" : "sn-pos"}>{f(myNetFull)} FCFA</strong></div>
+          </>
+        )}
       </div>
 
       <div style={box}>
-        <div style={head}>🏭 المورّد (FCFA)</div>
-        <div style={{ ...row, marginTop: 0 }}><span>ديون المورّد علينا (غير مدفوع)</span><strong className={supUnpaid > 0 ? "sn-neg" : ""}>{f(supUnpaid)} FCFA</strong></div>
-        <div style={row}><span>ما دفعناه له فعلاً</span><strong>{f(supPaid)} FCFA</strong></div>
+        <button onClick={() => setShowSup(!showSup)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "transparent", border: "none", color: "inherit", fontFamily: "inherit", cursor: "pointer", padding: 0 }}>
+          <span style={head}>🏭 المورّد (FCFA)</span>
+          <span style={{ color: "#8b95ac", fontSize: 13 }}>{showSup ? "▾ إخفاء" : "◂ عرض"}</span>
+        </button>
+        {showSup && (
+          <>
+            <div style={{ ...row, marginTop: 8 }}><span>ديون المورّد علينا (غير مدفوع)</span><strong className={supUnpaid > 0 ? "sn-neg" : ""}>{f(supUnpaid)} FCFA</strong></div>
+            <div style={row}><span>ما دفعناه له فعلاً</span><strong>{f(supPaid)} FCFA</strong></div>
+          </>
+        )}
       </div>
 
       <div style={box}>
-        <div style={head}>💵 ديون زبائنه ({myDevices.length})</div>
-        {myDevices.length === 0 ? (
-          <p className="sn-hint" style={{ textAlign: "center", margin: 0 }}>لا أجهزة.</p>
-        ) : (
-          myDevices.map((d) => (
-            <div key={d.id} style={row}><span style={{ minWidth: 0 }}>{d.customerName || "بدون اسم"}{d.accountNumber ? ` (${d.accountNumber})` : ""}</span><strong className={tb(d.debt, d.debtCurrency || d.currency || "MRU") > 0 ? "sn-neg" : "sn-pos"}>{f(tb(d.debt, d.debtCurrency || d.currency || "MRU"))} FCFA</strong></div>
-          ))
+        <button onClick={() => setShowDevs(!showDevs)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "transparent", border: "none", color: "inherit", fontFamily: "inherit", cursor: "pointer", padding: 0 }}>
+          <span style={head}>💵 ديون زبائنه ({myDevices.length})</span>
+          <span style={{ color: "#8b95ac", fontSize: 13 }}>{showDevs ? "▾ إخفاء" : "◂ عرض الأجهزة"}</span>
+        </button>
+        {showDevs && (
+          myDevices.length === 0 ? (
+            <p className="sn-hint" style={{ textAlign: "center", margin: "8px 0 0" }}>لا أجهزة.</p>
+          ) : (
+            <div style={{ marginTop: 8 }}>
+              {myDevices.map((d) => (
+                <div key={d.id} style={row}><span style={{ minWidth: 0 }}>{d.customerName || "بدون اسم"}{d.accountNumber ? ` (${d.accountNumber})` : ""}</span><strong className={tb(d.debt, d.debtCurrency || d.currency || "MRU") > 0 ? "sn-neg" : "sn-pos"}>{f(tb(d.debt, d.debtCurrency || d.currency || "MRU"))} FCFA</strong></div>
+              ))}
+            </div>
+          )
         )}
         {myDevices.length > 0 && (
           <div style={{ ...row, borderTop: "1px solid #243352", paddingTop: 8, marginTop: 8, fontWeight: 800 }}>
-            <span>الإجمالي ({myDevices.length})</span>
+            <span>إجمالي ديون زبائنه</span>
             <strong className={custDebt > 0 ? "sn-neg" : "sn-pos"}>{f(custDebt)} FCFA</strong>
           </div>
         )}
@@ -5308,10 +5356,32 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
 
       <button onClick={() => exportAgentPDF(agent, data, settings)} style={{ width: "100%", marginBottom: 10, background: "#13294a", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>📄 كشف PDF (للإرسال)</button>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-        <button onClick={() => ask(`كم دفع لك ${agent.name}؟ (FCFA)`, (v, n) => onWithdraw(v, n))} style={{ flex: 1, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>💰 سجّل دفعة منه</button>
-        <button onClick={() => ask(`كم تزيد على دين المندوب؟ (FCFA)`, (v, n) => onAddCredit(v, n))} style={{ flex: 1, background: "#3a2a16", color: "#fcd34d", border: "1px solid #5a4a2a", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➕ زيادة عليه</button>
-      </div>
+      <button onClick={() => { const def = String(Math.max(0, toF(agentNetNow))); const v = window.prompt(`كم تدفع للمندوب ${agent.name}؟ (FCFA)`, def); if (v != null && Number(v) > 0) onSettle(Number(v)); }} style={{ width: "100%", marginBottom: 10, background: "#13294a", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>💵 ادفع للمندوب نصيبه</button>
+
+      <button onClick={() => setPayOpen(!payOpen)} style={{ width: "100%", marginBottom: payOpen ? 8 : 10, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>💰 دفعة من المندوب {payOpen ? "▾" : "◂"}</button>
+      {payOpen && (
+        <div style={{ ...box, marginTop: 0 }}>
+          <div style={{ fontSize: 12.5, color: "#8b95ac", marginBottom: 8 }}>المندوب يدفع لك دين جهاز معيّن؟ اختر الجهاز ليُسجَّل تحصيله:</div>
+          {(() => {
+            const debtDevs = myDevices.filter((d) => tb(d.debt, d.debtCurrency || d.currency || "MRU") > 0);
+            if (debtDevs.length === 0) return <p className="sn-hint" style={{ textAlign: "center", margin: "0 0 8px" }}>لا ديون على أجهزته حالياً.</p>;
+            return debtDevs.map((d) => (
+              <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: "#0e1530", border: "1px solid #243352", borderRadius: 10, padding: "8px 10px", marginBottom: 6 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{d.customerName || "بدون اسم"}</div>
+                  <div style={{ color: "#fb7185", fontSize: 12 }}>{f(tb(d.debt, d.debtCurrency || d.currency || "MRU"))} FCFA</div>
+                </div>
+                <button onClick={() => { onCollectDevice(d); }} style={{ flex: "none", background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 9, padding: "8px 12px", fontFamily: "inherit", fontWeight: 800, fontSize: 13 }}>✓ دُفع</button>
+              </div>
+            ));
+          })()}
+          <div style={{ borderTop: "1px dashed #2a3550", margin: "8px 0", paddingTop: 8 }}>
+            <button onClick={() => ask(`مبلغ عام دفعه ${agent.name} (غير مخصّص لجهاز)؟ (FCFA)`, (v, n) => onWithdraw(v, n))} style={{ width: "100%", background: "#1a2540", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 10, padding: "10px", fontFamily: "inherit", fontWeight: 700, fontSize: 13 }}>＋ مبلغ عام (غير مخصّص لجهاز)</button>
+          </div>
+        </div>
+      )}
+
+      <button onClick={() => ask(`كم تزيد على دين المندوب؟ (FCFA)`, (v, n) => onAddCredit(v, n))} style={{ width: "100%", marginBottom: 10, background: "#3a2a16", color: "#fcd34d", border: "1px solid #5a4a2a", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➕ زيادة على دينه</button>
 
       <button onClick={reset} style={{ width: "100%", marginBottom: 14, background: "#3a1620", color: "#fca5a5", border: "1px solid #5a2a3a", borderRadius: 12, padding: "11px", fontFamily: "inherit", fontWeight: 800, fontSize: 13.5 }}>🗑️ بدء حساب جديد من الصفر</button>
 
