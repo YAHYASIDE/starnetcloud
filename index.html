@@ -5065,6 +5065,8 @@ function Agents({ data, toBase, settings, onAddAgent, onEditAgent, onDeleteAgent
         agents.map((a) => {
           const profit = agentProfit(a.id, data, toBase);
           const share = (profit * (Number(a.percent) || 0)) / 100;
+          const expected = agentProfitExpected(a.id, data, toBase);
+          const shareExpected = (expected * (Number(a.percent) || 0)) / 100;
           const paid = payouts.filter((p) => p.agentId === a.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
           const remain = Math.round((share - paid) * 100) / 100;
           const count = data.devices.filter((d) => d.agentId === a.id).length;
@@ -5073,7 +5075,6 @@ function Agents({ data, toBase, settings, onAddAgent, onEditAgent, onDeleteAgent
           const lossCount = myDevs.filter((d) => (d.id in devProfit) && devProfit[d.id] <= 0).length;
           const bal = agentBalance(a, data, toBase);
           const rem = agentRemaining(a, data, (settings && settings.rates) || { USDT: 430, FCFA: 3.6, MRU: 1 });
-          const expected = agentProfitExpected(a.id, data, toBase);
           const up = agentUnpaid(a.id, data);
           const upCust = Object.entries(up.custDebt);
           const upSup = Object.entries(up.supDue);
@@ -5089,8 +5090,9 @@ function Agents({ data, toBase, settings, onAddAgent, onEditAgent, onDeleteAgent
                   <span className="sn-agent-sub">{count} جهاز • نسبة {a.percent || 0}%</span>
                 </div>
                 <div className="sn-agent-share">
-                  <span>نصيبه</span>
-                  <strong className={share < 0 ? "sn-neg" : ""}>{money(share)} عملة</strong>
+                  <span>نصيبه (متوقّع)</span>
+                  <strong className={shareExpected < 0 ? "sn-neg" : "sn-pos"}>{money(shareExpected)}</strong>
+                  <span className="sn-share-sub">محصّل: <b className={share < 0 ? "sn-neg" : "sn-pos"}>{money(share)}</b></span>
                 </div>
               </div>
               <div className="sn-ag-twin">
@@ -7597,7 +7599,8 @@ const CSS = `
 
 /* ====== ربح المندوب: حقيقي / متوقّع / غير مدفوع ====== */
 .sn-ag-twin{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin:8px 0}
-.sn-ag-twin-box{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:8px 6px;text-align:center;font-family:inherit}
+.sn-share-sub{display:block;font-size:10px;color:#9aa6bd;margin-top:2px;font-weight:700}
+.sn-share-sub b{font-weight:900}.sn-ag-twin-box{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:8px 6px;text-align:center;font-family:inherit}
 .sn-ag-twin-box span{display:block;font-size:9.5px;color:#9aa6bd;margin-bottom:3px}
 .sn-ag-twin-box b{font-size:13px;font-weight:900}
 .sn-ag-twin-box.exp{background:rgba(79,157,255,.07);border-color:rgba(79,157,255,.2)}
