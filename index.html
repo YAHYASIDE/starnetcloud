@@ -590,6 +590,7 @@ function computeDue(data, settings) {
   const today = todayStr();
   const renewals = [], supplier = [], debts = [];
   (data.devices || []).forEach((d) => {
+    if (d.archived) return;
     if (d.broken) {
       if (d.debt > 0) debts.push(d);
       return;
@@ -930,6 +931,13 @@ function StarNetApp() {
     setToast(m);
     setTimeout(() => setToast(""), 2600);
   };
+  const PIN_CODE = "32720707";
+  const requirePin = (action) => {
+    const v = window.prompt("🔒 أدخل رمز القفل لتأكيد هذه العملية الحسّاسة:");
+    if (v === null) return;
+    if (String(v).trim() === PIN_CODE) action();
+    else flash("❌ رمز القفل خاطئ — أُلغيت العملية");
+  };
   // التقاط لقطة قبل أي إجراء مهم لإتاحة التراجع
   const snapshot = (label) => setUndoSnap({ data, label, t: Date.now() });
   const doUndo = () => {
@@ -1148,7 +1156,7 @@ function StarNetApp() {
   }
 
   function deleteDevice(device) {
-    setConfirm({
+    requirePin(() => setConfirm({
       text: `حذف جهاز «${device.customerName || "بدون اسم"}»؟ سيُنقل إلى سلة المحذوفات ويمكن استعادته.`,
       onYes: () => {
         setData((d) => {
@@ -1179,7 +1187,7 @@ function StarNetApp() {
         setConfirm(null);
         setUndoSnap({ data, label: "حذف جهاز", t: Date.now() });
       },
-    });
+    }));
   }
   function restoreTrash(item) {
     setData((d) => ({
@@ -1929,6 +1937,7 @@ function StarNetApp() {
             onBroken={markBroken}
             onClearDebt={clearDebt}
             onWhats={(dev, kind) => openWhatsApp(dev, kind, settings, customerBalance(dev, data, settings.rates))}
+            onArchive={archiveDevice}
             onAdd={() => setEditing("new")}
             goDevices={() => setTab("devices")}
             goCalendar={() => setPanel("calendar")}
@@ -1973,22 +1982,23 @@ function StarNetApp() {
             settings={settings}
             onSave={updateSettings}
             onClearTx={() =>
-              setConfirm({
+              requirePin(() => setConfirm({
                 text: "حذف كل المعاملات وكشوف الحسابات (يصبح سجل الأرباح = 0)؟\n\nالأجهزة وبياناتها وديونها تبقى كما هي. لا يمكن التراجع.",
                 onYes: () => {
-                  setData({ ...data, transactions: [], agentLedger: [], customerLedger: [], agentPayouts: [] });
+                  setData({ ...data, transactions: [], agentLedger: [], customerLedger: [], agentPayouts: [], agents: (data.agents || []).map((a) => ({ ...a, shareBaseline: 0 })) });
                   setConfirm(null);
                   flash("تم حذف كل المعاملات");
                 },
-              })
+              }))
             }
             onZeroAll={() =>
-              setConfirm({
+              requirePin(() => setConfirm({
                 text: "تصفير كامل: حذف المعاملات + تصفير كل ديون/مدفوعات/تكاليف الأجهزة حتى يصبح كل شيء 0؟\n\nتبقى أسماء الأجهزة وأرقامها وبريدها وحساباتها وباقاتها وتواريخها ومندوبها. لا يمكن التراجع.",
                 onYes: () => {
                   setData({
                     ...data,
                     transactions: [], agentLedger: [], customerLedger: [], agentPayouts: [],
+                    agents: (data.agents || []).map((a) => ({ ...a, shareBaseline: 0 })),
                     devices: (data.devices || []).map((x) => ({
                       ...x,
                       totalCustomer: 0, amountPaid: 0, debt: 0, credit: 0,
@@ -1998,17 +2008,17 @@ function StarNetApp() {
                   setConfirm(null);
                   flash("تم تصفير كل شيء — الأجهزة محفوظة");
                 },
-              })
+              }))
             }
             onReset={() =>
-              setConfirm({
+              requirePin(() => setConfirm({
                 text: "مسح كل البيانات نهائياً؟ لا يمكن التراجع.",
                 onYes: () => {
                   setData(DEFAULT_DATA);
                   setConfirm(null);
                   flash("تم مسح كل البيانات");
                 },
-              })
+              }))
             }
           />
         )}
@@ -2670,16 +2680,44 @@ function QuickLookup({ data, onWhats }) {
   );
 }
 
-function DueToday({ data, settings, onRenew, onWhats, onClearDebt, onMarkPaid, goDevices }) {
+function DueToday({ data, settings, onRenew, onWhats, onClearDebt, onMarkPaid, onArchive, goDevices }) {
   const [open, setOpen] = useState(true);
+  const [archOpen, setArchOpen] = useState(false);
   const due = useMemo(() => computeDue(data, settings), [data, settings]);
+  const archived = useMemo(() => (data.devices || []).filter((d) => d.archived), [data.devices]);
   const [notifOn, setNotifOn] = useState(typeof Notification !== "undefined" && Notification.permission === "granted");
+  const ArchiveFolder = archived.length > 0 ? (
+    <div className="sn-arch-folder">
+      <button className="sn-arch-head" onClick={() => setArchOpen(!archOpen)}>
+        <span>📦 الأرشيف ({archived.length})</span>
+        <span>{archOpen ? "▾" : "◂"}</span>
+      </button>
+      {archOpen && (
+        <div className="sn-arch-body">
+          {archived.map((d) => (
+            <div className="sn-due-item" key={d.id}>
+              <div className="sn-due-info">
+                <span className="sn-due-name">{d.customerName || "—"}</span>
+                <span className="sn-due-meta">{[d.package, d.endDate ? fmtDate(d.endDate) : ""].filter(Boolean).join(" • ")}</span>
+              </div>
+              <div className="sn-due-acts">
+                <button className="sn-due-btn sn-due-btn--go" onClick={() => onArchive && onArchive(d)}>📤 استرجاع</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : null;
   if (due.total === 0) {
     return (
-      <section className="sn-due sn-due--empty">
-        <span>📅 تستحق اليوم</span>
-        <span className="sn-due-clear">لا شيء مستحقّ اليوم — ممتاز! ✅</span>
-      </section>
+      <>
+        {ArchiveFolder}
+        <section className="sn-due sn-due--empty">
+          <span>📅 تستحق اليوم</span>
+          <span className="sn-due-clear">لا شيء مستحقّ اليوم — ممتاز! ✅</span>
+        </section>
+      </>
     );
   }
   const enableNotif = () => {
@@ -2692,7 +2730,9 @@ function DueToday({ data, settings, onRenew, onWhats, onClearDebt, onMarkPaid, g
     });
   };
   return (
-    <section className="sn-due">
+    <>
+      {ArchiveFolder}
+      <section className="sn-due">
       <button className="sn-due-head" onClick={() => setOpen(!open)}>
         <span>📅 تستحق اليوم <span className="sn-due-count">{due.total}</span></span>
         <span>{open ? "▾" : "◂"}</span>
@@ -2712,6 +2752,7 @@ function DueToday({ data, settings, onRenew, onWhats, onClearDebt, onMarkPaid, g
                     <span className="sn-due-meta">{dl < 0 ? `منتهٍ منذ ${-dl}ي` : dl === 0 ? "ينتهي اليوم" : `بعد ${dl}ي`}</span>
                   </div>
                   <div className="sn-due-acts">
+                    {onArchive && <button className="sn-due-btn sn-due-btn--hide" onClick={() => onArchive(d)}>🧊 إخفاء</button>}
                     <button className="sn-due-btn sn-due-btn--wa" onClick={() => onWhats(d, "reminder")}>واتساب</button>
                     <button className="sn-due-btn sn-due-btn--go" onClick={() => onRenew(d)}>تجديد</button>
                   </div>
@@ -2754,11 +2795,12 @@ function DueToday({ data, settings, onRenew, onWhats, onClearDebt, onMarkPaid, g
           )}
         </div>
       )}
-    </section>
+      </section>
+    </>
   );
 }
 
-function Dashboard({ data, settings, toBase, onRenew, onMarkPaid, onBroken, onClearDebt, onWhats, onAdd, goDevices, goCalendar }) {
+function Dashboard({ data, settings, toBase, onRenew, onMarkPaid, onBroken, onClearDebt, onWhats, onArchive, onAdd, goDevices, goCalendar }) {
   const t = todayStr();
   const [openSup, setOpenSup] = useState(true);
   const [openSupPaid, setOpenSupPaid] = useState(false);
@@ -2814,7 +2856,7 @@ function Dashboard({ data, settings, toBase, onRenew, onMarkPaid, onBroken, onCl
 
   return (
     <div className="sn-page">
-      <DueToday data={data} settings={settings} onRenew={onRenew} onWhats={onWhats} onClearDebt={onClearDebt} onMarkPaid={onMarkPaid} goDevices={goDevices} />
+      <DueToday data={data} settings={settings} onRenew={onRenew} onWhats={onWhats} onClearDebt={onClearDebt} onMarkPaid={onMarkPaid} onArchive={onArchive} goDevices={goDevices} />
       {goCalendar && (
         <button className="sn-btn sn-btn--ghost sn-full" onClick={goCalendar}>🗓️ تقويم التجديدات الكامل — كل الأيام والتفاصيل</button>
       )}
@@ -3137,6 +3179,25 @@ function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkP
   const _rk = (d) => d.updatedAt || d.startDate || String(d.id || "");
   const rightList = [...list].sort((a, b) => diffDays(_t, a.endDate) - diffDays(_t, b.endDate));
   const leftList = [...list].sort((a, b) => String(_rk(b)).localeCompare(String(_rk(a))));
+  const dayLabel = (day) => {
+    if (!day) return "—";
+    if (day === _t) return "اليوم";
+    if (day === addDays(_t, -1)) return "أمس";
+    return fmtDate(day);
+  };
+  const renderLeftGrouped = () => {
+    const out = [];
+    let last = null;
+    leftList.forEach((d) => {
+      const day = (d.updatedAt || d.startDate || "").slice(0, 10);
+      if (day !== last) {
+        last = day;
+        out.push(<div className="sn-day-h" key={"day_" + day}>📅 {dayLabel(day)}</div>);
+      }
+      out.push(renderCard(d));
+    });
+    return out;
+  };
   const renderCard = (d) => (
     <DeviceCard
       key={d.id}
@@ -3216,7 +3277,7 @@ function Devices({ data, toBase, onEdit, onRenew, onDelete, onClearDebt, onMarkP
           </div>
           <div className="sn-dev-col">
             <div className="sn-col-h">🕒 آخر تعديل</div>
-            {leftList.map(renderCard)}
+            {renderLeftGrouped()}
           </div>
         </div>
       )}
@@ -3354,6 +3415,13 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
   return (
     <div className={"sn-card sn-card--" + s.key + (riskNoPay ? " sn-card--risk" : "")} style={cardStyle}>
       {riskNoPay && <div className="sn-risk-banner">🚫 لم يسدّد الزبون وقارب الانتهاء — لا تدفع للمورّد!</div>}
+      {(() => {
+        if (d.broken) return <span className="sn-day-badge brk" title="معطّل">🔧</span>;
+        const dl = diffDays(todayStr(), d.endDate);
+        const cls = dl <= 0 ? "bad" : dl <= 3 ? "warn" : "ok";
+        const txt = dl < 0 ? `${-dl}-` : dl === 0 ? "اليوم" : `${dl}ي`;
+        return <span className={"sn-day-badge " + cls} title="الأيام المتبقية">{txt}</span>;
+      })()}
       <div className="sn-card-top sn-card-top--mini" onClick={() => setOpen(!open)}>
         <div className="sn-card-id">
           <span className="sn-card-name">
@@ -3371,6 +3439,7 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
             </button>
           ) : <span className="sn-card-sub">بدون رقم</span>}
           {agentName ? <span className="sn-card-agent">👤 المندوب: <b>{agentName}</b></span> : null}
+          {d.updatedAt ? <span className="sn-card-edited">🕒 {fmtDateTime(d.updatedAt)}</span> : null}
         </div>
         <div className="sn-card-status">
           <div className="sn-quick-acts sn-quick-acts--mini" onClick={(e) => e.stopPropagation()}>
@@ -7253,7 +7322,13 @@ const CSS = `
 .sn-chip.is-active{background:var(--accent);border-color:var(--accent);color:#04122b;font-weight:700}
 
 /* بطاقة الجهاز */
-.sn-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;margin-bottom:9px;overflow:hidden;border-inline-start:4px solid var(--muted)}
+.sn-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;margin-bottom:9px;overflow:hidden;border-inline-start:4px solid var(--muted);position:relative}
+.sn-day-badge{position:absolute;top:7px;right:10px;z-index:3;min-width:22px;height:22px;padding:0 7px;border-radius:11px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.45)}
+.sn-day-badge.ok{background:#16a34a}
+.sn-day-badge.warn{background:#f59e0b;color:#1a1300}
+.sn-day-badge.bad{background:#dc2626}
+.sn-day-badge.brk{background:#64748b}
+.sn-card-name{padding-inline-start:46px}
 .sn-card--expired{border-inline-start-color:var(--bad)}
 .sn-card--urgent{border-inline-start-color:var(--warn)}
 .sn-card--soon{border-inline-start-color:var(--accent)}
@@ -7412,12 +7487,12 @@ const CSS = `
 .sn-tab.is-active{color:var(--accent)}
 
 /* النوافذ المنبثقة */
-.sn-overlay{position:fixed;inset:0;background:rgba(4,8,18,.72);backdrop-filter:blur(3px);z-index:60;display:flex;align-items:flex-end;justify-content:center}
+.sn-overlay{position:fixed;inset:0;background:rgba(4,8,18,.72);backdrop-filter:blur(3px);z-index:9999;display:flex;align-items:flex-end;justify-content:center}
 .sn-sheet{background:var(--surface);width:100%;max-width:720px;max-height:92vh;border-radius:22px 22px 0 0;border:1px solid var(--border);display:flex;flex-direction:column;animation:sn-up .25s ease}
 @keyframes sn-up{from{transform:translateY(100%)}to{transform:translateY(0)}}
-.sn-sheet-head{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface)}
-.sn-sheet-head h3{font-size:16px;font-weight:700}
-.sn-x{background:var(--surface2);border:none;color:var(--muted);width:30px;height:30px;border-radius:8px;font-size:15px;cursor:pointer}
+.sn-sheet-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:5}
+.sn-sheet-head h3{font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.sn-x{flex:none;background:#3a1620;border:1px solid #5a2a3a;color:#fca5a5;width:38px;height:38px;border-radius:10px;font-size:18px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .sn-sheet-body{padding:16px 18px 22px;overflow-y:auto}
 .sn-field{display:block;margin-bottom:13px}
 .sn-field>span{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
@@ -7617,6 +7692,14 @@ const CSS = `
 .sn-dev-2col{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;direction:rtl}
 .sn-dev-col{display:flex;flex-direction:column;gap:10px;min-width:0}
 .sn-col-h{background:#0e1530;border:1px solid var(--border);border-radius:9px;padding:6px 8px;font-size:11.5px;font-weight:800;color:#aeb8cc;text-align:center}
+.sn-day-h{font-size:10.5px;font-weight:800;color:#8fa0bd;background:rgba(255,255,255,.03);border:1px dashed var(--border);border-radius:8px;padding:4px 8px;text-align:center;margin-top:2px}
+.sn-card-edited{display:block;font-size:9px;color:#6b7488;margin-top:4px;font-weight:600;letter-spacing:.2px}
+
+/* ====== ملف الأرشيف على الرئيسية ====== */
+.sn-arch-folder{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:14px;margin-bottom:10px;overflow:hidden}
+.sn-arch-head{width:100%;display:flex;align-items:center;justify-content:space-between;background:transparent;border:none;color:#aeb8cc;font-family:inherit;font-weight:800;font-size:13.5px;padding:12px 14px;cursor:pointer}
+.sn-arch-body{padding:0 12px 10px;display:flex;flex-direction:column;gap:6px}
+.sn-due-btn--hide{background:#243352;color:#aeb8cc;border:1px solid #34425f}
 .sn-dev-col > .sn-card{min-width:0}
 .sn-dev-col .sn-card-top{flex-direction:column;align-items:stretch;gap:8px}
 .sn-dev-col .sn-quick-acts{margin-inline-start:0}
