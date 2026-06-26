@@ -296,9 +296,9 @@ const DEFAULT_DATA = {
     pin: "", // رمز قفل التطبيق (فارغ = بلا قفل)
     monthlyGoal: 0, // هدف ربح الشهر (بعملة الأساس) — 0 = بلا هدف
     msgCharged:
-      "مرحباً {name} 👋\nتم شحن جهاز ستارلينك الخاص بك بنجاح ✅\n\n👤 الاسم: {name}\n📧 البريد: {email}\n🔢 رقم الحساب: {account}\n📅 تاريخ الشحن: {start}\n⏳ ينتهي الرصيد بتاريخ: {end}{debtline}{creditline}\n\nشكراً لتعاملك مع STAR NET ⭐",
+      "مرحباً {name} 👋\n✅ تم شحن اشتراكك بنجاح\n\n📅 من {start} إلى {end}{debtline}{creditline}\n\n📡 ستارلينك\n📧 {email}\n🔢 {account}\n\nشكراً لثقتك بنا 💙\nSTAR NET ⭐",
     msgReminder:
-      "STAR NET ⭐\n🔔 تنبيه قرب انتهاء الاشتراك\n\nالاسم: {name}\nالبريد: {email}\nرقم الجهاز: {account}\nتاريخ الانتهاء: {end}\n{remaining}{debtline}{creditline}\n\nللاستمرار في الخدمة، يرجى إعادة الشحن قبل تاريخ الانتهاء.\n\nشكراً لاختياركم STAR NET ⭐",
+      "مرحباً {name} 👋\n{remaining}\n📅 ينتهي بتاريخ: {end}{debtline}{creditline}\n\n📡 ستارلينك\n📧 {email}\n🔢 {account}\n\nنرجو إعادة الشحن قبل الانتهاء حفاظاً على الخدمة 🙏\nSTAR NET ⭐",
   },
   devices: [],
   transactions: [],
@@ -588,23 +588,28 @@ function debtAgeDays(device) {
 function computeDue(data, settings) {
   const soon = settings.soonDays || 3;
   const today = todayStr();
-  const renewals = [], supplier = [], debts = [];
+  const renewals = [], weekly = [], supplier = [], debts = [];
   (data.devices || []).forEach((d) => {
     if (d.archived) return;
     if (d.broken) {
       if (d.debt > 0) debts.push(d);
       return;
     }
-    const dl = diffDays(today, d.endDate);
-    if (dl <= soon) renewals.push({ d, dl });
-    if (d.cost > 0 && !d.costPaid) {
-      const due = d.supplierDueDate || d.endDate;
-      if (diffDays(today, due) <= 0) supplier.push(d);
+    // جهاز بلا تاريخ انتهاء (مثلاً بعد حذف المعاملات) لا يُعدّ مستحقّاً للتجديد
+    if (d.endDate) {
+      const dl = diffDays(today, d.endDate);
+      if (dl <= soon) renewals.push({ d, dl });
+      else if (dl <= 7) weekly.push({ d, dl });
+      if (d.cost > 0 && !d.costPaid) {
+        const due = d.supplierDueDate || d.endDate;
+        if (diffDays(today, due) <= 0) supplier.push(d);
+      }
     }
     if (d.debt > 0) debts.push(d);
   });
   renewals.sort((a, b) => a.dl - b.dl);
-  return { renewals, supplier, debts, total: renewals.length + supplier.length + debts.length };
+  weekly.sort((a, b) => a.dl - b.dl);
+  return { renewals, weekly, supplier, debts, total: renewals.length + supplier.length + debts.length };
 }
 
 /* ----------------------- طبقة التخزين ----------------------- */
@@ -1057,6 +1062,7 @@ function StarNetApp() {
           accountNumber: form.accountNumber || "",
           wifiPassword: form.wifiPassword || "",
           emailPassword: form.emailPassword || "",
+          starlinkPassword: form.starlinkPassword || "",
           country: form.country || "",
           currency: form.currency || "MRU",
           totalCustomer: form.totalCustomer ?? "",
@@ -1931,6 +1937,10 @@ function StarNetApp() {
                 <span className="sn-drawer-ic">🗓️</span>
                 <span className="sn-drawer-lbl">تقويم التجديدات</span>
               </button>
+              <button className="sn-drawer-item" onClick={() => { setPanel("byday"); setDrawer(false); }}>
+                <span className="sn-drawer-ic">📁</span>
+                <span className="sn-drawer-lbl">أجهزة حسب يوم الشهر</span>
+              </button>
               <button className="sn-drawer-item" onClick={() => { setPanel("calc"); setDrawer(false); }}>
                 <span className="sn-drawer-ic">💹</span>
                 <span className="sn-drawer-lbl">حاسبة سعر البيع</span>
@@ -2010,11 +2020,19 @@ function StarNetApp() {
             onSave={updateSettings}
             onClearTx={() =>
               requirePin(() => setConfirm({
-                text: "حذف كل المعاملات وكشوف الحسابات (يصبح سجل الأرباح = 0)؟\n\nالأجهزة وبياناتها وديونها تبقى كما هي. لا يمكن التراجع.",
+                text: "حذف كل المعاملات وكشوف الحسابات (يصبح سجل الأرباح = 0)؟\n\nتبقى الأجهزة وأسماؤها وبريدها وحساباتها وديونها، لكن تُمسح تواريخها فتختفي من «تحتاج إلى متابعة» حتى تضيف عملية جديدة. لا يمكن التراجع.",
                 onYes: () => {
-                  setData({ ...data, transactions: [], agentLedger: [], customerLedger: [], agentPayouts: [], agents: (data.agents || []).map((a) => ({ ...a, shareBaseline: 0 })) });
+                  setData({
+                    ...data,
+                    transactions: [], agentLedger: [], customerLedger: [], agentPayouts: [],
+                    agents: (data.agents || []).map((a) => ({ ...a, shareBaseline: 0 })),
+                    devices: (data.devices || []).map((x) => ({
+                      ...x,
+                      startDate: "", endDate: "", durationDays: 0, supplierDueDate: "", history: [],
+                    })),
+                  });
                   setConfirm(null);
-                  flash("تم حذف كل المعاملات");
+                  flash("تم حذف كل المعاملات ومسح تواريخ الأجهزة");
                 },
               }))
             }
@@ -2131,6 +2149,7 @@ function StarNetApp() {
           data={data}
           toBase={toBase}
           onClose={() => setPanel(null)}
+          onCopy={handleCopy}
           onAddCountry={() => setEditingCountry("new")}
           onEditCountry={setEditingCountry}
           onDeleteCountry={deleteCountry}
@@ -2485,11 +2504,10 @@ function exportAgentPDF(agent, data, settings) {
   const credits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "credit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const debits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  const liab = toF(custDebt) + credits;
-  const paidByAgent = debits;
-  const owesMe = liab - paidByAgent;
-  const shareRemaining = toF(agentNetNow) - payouts;
-  const remaining = owesMe - shareRemaining;
+  const collectedF = toF(custCollected);
+  const shareF = toF(agentNetNow);
+  const required = collectedF - shareF + credits;
+  const remaining = required - debits + payouts;
   const custRows = devs.map((d) => `<tr><td>${esc(d.customerName || "—")}</td><td>${esc(d.accountNumber || "—")}</td><td class="ltr">${f(tb(d.debt, d.debtCurrency || d.currency || "MRU"))}</td></tr>`).join("");
   const html = `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2517,18 +2535,20 @@ th{background:#f4f6fb}
 <button class="btn" onclick="window.print()">🖨️ حفظ PDF / طباعة</button>
 <h1>كشف حساب المندوب: ${esc(agent.name)}</h1>
 <div class="sub">${esc(settings.businessName)} ⭐ — ${fmtDate(todayStr())} — النسبة ${percent}% — كل المبالغ بـ FCFA</div>
-<div class="bal ${remaining > 0 ? "bal-d" : remaining < 0 ? "bal-c" : ""}">${remaining > 0 ? "المتبقّي على المندوب: " + money(remaining) + " FCFA" : remaining < 0 ? "مستحقّ له (نصيبه): " + money(-remaining) + " FCFA" : "الحساب مُسوّى ✓"}</div>
+<div class="bal ${remaining > 0 ? "bal-d" : remaining < 0 ? "bal-c" : ""}">${remaining > 0 ? "المتبقّي على المندوب: " + money(remaining) + " FCFA" : remaining < 0 ? "مستحقّ له: " + money(-remaining) + " FCFA" : "الحساب مُسوّى ✓"}</div>
 <h2>حسابه معي</h2>
 <table>
-<tr><td class="k">📌 إجمالي ما عليه (ديون زبائنه)</td><td class="v">${money(liab)} FCFA</td></tr>
-<tr><td class="k">💰 ما دفعه لي</td><td class="v pos">${money(paidByAgent)} FCFA</td></tr>
-<tr><td class="k">🔻 المتبقّي عليه (دينه لي)</td><td class="v ${owesMe > 0 ? "neg" : "pos"}">${money(owesMe)} FCFA</td></tr>
+<tr><td class="k">📥 ما جمعه من زبائنه</td><td class="v pos">${money(collectedF)} FCFA</td></tr>
+<tr><td class="k">🟢 نصيبه (يحتفظ به)</td><td class="v">− ${money(shareF)} FCFA</td></tr>
+${credits ? `<tr><td class="k">➕ زيادات يدوية عليه</td><td class="v">${money(credits)} FCFA</td></tr>` : ""}
+<tr><td class="k">📌 المطلوب منه (بعد نصيبه)</td><td class="v">${money(required)} FCFA</td></tr>
+<tr><td class="k">🤝 ما سلّمه لي</td><td class="v pos">${money(debits)} FCFA</td></tr>
+${payouts ? `<tr><td class="k">💵 ما دفعته له</td><td class="v">${money(payouts)} FCFA</td></tr>` : ""}
+<tr><td class="k">🔻 المتبقّي عليه</td><td class="v ${remaining > 0 ? "neg" : "pos"}">${remaining < 0 ? "له " + money(-remaining) : money(remaining)} FCFA</td></tr>
 </table>
 <h2>نصيب المندوب</h2>
 <table>
-<tr><td class="k">🟢 نصيبه من المُحصّل</td><td class="v">${money(toF(agentNetNow))} FCFA</td></tr>
-<tr><td class="k">✅ دُفع له</td><td class="v pos">${money(payouts)} FCFA</td></tr>
-<tr><td class="k">💵 المتبقّي له (ادفعه له)</td><td class="v pos">${money(Math.max(0, shareRemaining))} FCFA</td></tr>
+<tr><td class="k">🟢 نصيبه من الربح المُحصّل (مخصوم تلقائياً)</td><td class="v">${money(shareF)} FCFA</td></tr>
 </table>
 <h2>أرباح أجهزته</h2>
 <table>
@@ -2729,6 +2749,7 @@ function QuickLookup({ data, onWhats }) {
 function DueToday({ data, settings, onRenew, onWhats, onClearDebt, onMarkPaid, onArchive, goDevices }) {
   const [open, setOpen] = useState(true);
   const [archOpen, setArchOpen] = useState(false);
+  const [weekOpen, setWeekOpen] = useState(true);
   const due = useMemo(() => computeDue(data, settings), [data, settings]);
   const archived = useMemo(() => (data.devices || []).filter((d) => d.archived), [data.devices]);
   const [notifOn, setNotifOn] = useState(typeof Notification !== "undefined" && Notification.permission === "granted");
@@ -2755,10 +2776,36 @@ function DueToday({ data, settings, onRenew, onWhats, onClearDebt, onMarkPaid, o
       )}
     </div>
   ) : null;
+  const WeekSection = due.weekly.length > 0 ? (
+    <div className="sn-arch-folder sn-week-folder">
+      <button className="sn-arch-head" onClick={() => setWeekOpen(!weekOpen)}>
+        <span>📆 تستحق هذا الأسبوع ({due.weekly.length})</span>
+        <span>{weekOpen ? "▾" : "◂"}</span>
+      </button>
+      {weekOpen && (
+        <div className="sn-arch-body">
+          {due.weekly.map(({ d, dl }) => (
+            <div className="sn-due-item" key={d.id}>
+              <div className="sn-due-info">
+                <span className="sn-due-name">{d.customerName || "—"}</span>
+                <span className="sn-due-meta">{dl === 0 ? "ينتهي اليوم" : `بعد ${dl} يوم`}{d.package ? " • " + d.package : ""}</span>
+              </div>
+              <div className="sn-due-acts">
+                {onArchive && <button className="sn-due-btn sn-due-btn--hide" onClick={() => onArchive(d)}>🧊 إخفاء</button>}
+                <button className="sn-due-btn sn-due-btn--wa" onClick={() => onWhats(d, "reminder")}>واتساب</button>
+                <button className="sn-due-btn sn-due-btn--go" onClick={() => onRenew(d)}>تجديد</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : null;
   if (due.total === 0) {
     return (
       <>
         {ArchiveFolder}
+        {WeekSection}
         <section className="sn-due sn-due--empty">
           <span>📅 تستحق اليوم</span>
           <span className="sn-due-clear">لا شيء مستحقّ اليوم — ممتاز! ✅</span>
@@ -2778,6 +2825,7 @@ function DueToday({ data, settings, onRenew, onWhats, onClearDebt, onMarkPaid, o
   return (
     <>
       {ArchiveFolder}
+      {WeekSection}
       <section className="sn-due">
       <button className="sn-due-head" onClick={() => setOpen(!open)}>
         <span>📅 تستحق اليوم <span className="sn-due-count">{due.total}</span></span>
@@ -3575,9 +3623,43 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
               {d.kit && <CField k="KIT (معرّف الجهاز)" v={d.kit} copy={d.kit} onCopy={onCopy} />}
               <CField k="رقم الحساب" v={d.accountNumber} copy={d.accountNumber} onCopy={onCopy} />
               <CField k="البريد الإلكتروني" v={d.email} copy={d.email} onCopy={onCopy} />
+              {d.email && <CField k="🔎 اسم الاختصار (للبحث)" v={d.email.split("@")[0]} copy={d.email.split("@")[0]} onCopy={onCopy} />}
               <CField k="مرور الواي فاي" v={d.wifiPassword} copy={d.wifiPassword} onCopy={onCopy} secret />
               <CField k="مرور البريد" v={d.emailPassword} copy={d.emailPassword} onCopy={onCopy} secret />
+              {d.starlinkPassword && <CField k="مرور ستارلينك" v={d.starlinkPassword} copy={d.starlinkPassword} onCopy={onCopy} secret />}
             </div>
+          )}
+          {showSecret && (d.email || d.starlinkPassword || d.emailPassword) && (
+            <div className="sn-login-row">
+              {(d.email || d.starlinkPassword) && (
+                <button className="sn-login-btn sn-login-btn--star" onClick={() => {
+                  if (d.starlinkPassword) onCopy(d.starlinkPassword, "مرور ستارلينك (الصقه عند الدخول)");
+                  window.open("https://www.starlink.com/account/home", "_blank");
+                }}>🛰️ دخول ستارلينك</button>
+              )}
+              {d.email && (
+                <button className="sn-login-btn sn-login-btn--mail" onClick={() => {
+                  if (d.emailPassword) onCopy(d.emailPassword, "مرور البريد (الصقه عند الدخول)");
+                  window.open("https://accounts.google.com/AccountChooser?Email=" + encodeURIComponent(d.email), "_blank");
+                }}>📧 فتح Gmail</button>
+              )}
+            </div>
+          )}
+          {showSecret && (d.email || d.starlinkPassword || d.emailPassword || d.wifiPassword) && (
+            <button className="sn-login-copy" onClick={() => {
+              const lines = [
+                "🛰️ ستارلينك",
+                d.email ? `البريد: ${d.email}` : "",
+                d.starlinkPassword ? `مرور ستارلينك: ${d.starlinkPassword}` : "",
+                "",
+                "📧 البريد (للكود)",
+                d.emailPassword ? `مرور البريد: ${d.emailPassword}` : "",
+                "",
+                "📶 الواي فاي",
+                d.wifiPassword ? `مرور الواي فاي: ${d.wifiPassword}` : "",
+              ].filter((l) => l !== "");
+              onCopy(lines.join("\n"), "بيانات الدخول كاملة");
+            }}>📋 نسخ بيانات الدخول كاملة</button>
           )}
 
           {(asNotes(d.notes).length > 0 || d.originType || d.originNote || (d.photos || []).length > 0 || d.audio) && (
@@ -3628,7 +3710,7 @@ function DeviceCard({ d, agents = [], countries = [], balance, compact = false, 
             ) : (
               <HoldButton icon="🔧" label="تعطّل" variant="gold" hold onAct={() => onBroken(d)} />
             ))}
-            {!compact && <HoldButton icon="🗑️" label="حذف" variant="red" hold onAct={() => onDelete(d)} />}
+            {!compact && <HoldButton icon="🗑️" label="حذف" variant="red" doubleTap onAct={() => onDelete(d)} />}
           </div>
         </div>
       )}
@@ -4186,6 +4268,7 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
           ...initial,
           dialCode: initial.dialCode || "+222",
           emailPassword: initial.emailPassword || "",
+          starlinkPassword: initial.starlinkPassword || "",
           country: initial.country || "",
           costLocal: initial.costLocal ?? initial.cost ?? "",
           totalCustomer: initial.totalCustomer ?? "",
@@ -4213,6 +4296,7 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
           accountNumber: "",
           wifiPassword: "",
           emailPassword: "",
+          starlinkPassword: "",
           startDate: todayStr(),
           durationDays: settings.defaultDuration,
           country: "",          // دولة الشحن (سجل العملات)
@@ -4535,6 +4619,9 @@ function DeviceForm({ initial, settings, devices = [], contacts = [], agents = [
           <input dir="ltr" value={f.emailPassword} onChange={(e) => set("emailPassword", e.target.value)} />
         </Field>
       </div>
+      <Field label="كلمة مرور حساب ستارلينك">
+        <input dir="ltr" value={f.starlinkPassword} onChange={(e) => set("starlinkPassword", e.target.value)} />
+      </Field>
       <div className="sn-grid2">
         <Field label="تاريخ البداية">
           <input type="date" lang="en-GB" value={f.startDate} onChange={(e) => setStart(e.target.value)} />
@@ -5110,24 +5197,22 @@ function agentBalance(agent, data, toBase) {
 function agentRemaining(agent, data, rates) {
   const tb = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
   const fcfa = rates.FCFA || 3.6;
-  let custDebt = 0, realizedProfit = 0;
+  let collected = 0, realizedProfit = 0;
   (data.devices || []).forEach((d) => {
     if (d.agentId !== agent.id || d.broken) return;
-    custDebt += tb(d.debt, d.debtCurrency || d.currency || "MRU");
     const rev = tb(d.totalCustomer, d.currency || "MRU");
     const paid = tb(d.amountPaid, d.currency || "MRU");
     const cost = tb(d.cost, d.costCurrency || "USDT");
     const margin = rev > 0 ? (rev - cost) / rev : 0;
+    collected += paid;
     realizedProfit += paid * margin;
   });
-  const liab = Math.round(custDebt / fcfa);
+  const collectedF = Math.round(collected / fcfa);
   const shareF = Math.round((realizedProfit * ((Number(agent.percent) || 0) / 100)) / fcfa);
   const credits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "credit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const debits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  const owesMe = (liab + credits) - debits;        // دينه لي
-  const shareRemaining = shareF - payouts;          // نصيبه غير المدفوع
-  return owesMe - shareRemaining;                   // موجب=عليه ، سالب=له
+  return collectedF - shareF + credits - debits + payouts;   // موجب=عليه ، سالب=له
 }
 
 function Agents({ data, toBase, settings, onAddAgent, onEditAgent, onDeleteAgent, onViewAgent, onSettle, onAccount }) {
@@ -5385,12 +5470,11 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
   const credits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "credit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const debits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  const liab = toF(custDebt) + credits;
-  const paidByAgent = debits;                     // ما دفعه لي فعلاً (دفعات منه) FCFA
-  const owesMe = liab - paidByAgent;              // المتبقّي عليه (دينه لي) FCFA
-  const shareF = toF(agentNetNow);               // نصيبه من المُحصّل بالـFCFA
-  const shareRemaining = shareF - payouts;        // المتبقّي له من نصيبه (FCFA)
-  const remaining = owesMe - shareRemaining;      // الصافي: موجب=عليه ، سالب=له
+  const collectedF = toF(custCollected);            // ما جمعه من زبائنه
+  const shareF = toF(agentNetNow);                  // نصيبه من الربح المُحصّل
+  const required = collectedF - shareF + credits;   // المطلوب منه (بعد خصم نصيبه)
+  const remaining = required - debits + payouts;    // المتبقّي عليه: موجب=عليه ، سالب=له
+  const owesMe = remaining;
   const payments = [
     ...(data.agentPayouts || []).filter((p) => p.agentId === agent.id).map((p) => ({ id: p.id, kind: "payout", amount: Number(p.amount) || 0, date: p.date, note: "تسليم" })),
     ...(data.agentLedger || []).filter((l) => l.agentId === agent.id).map((l) => ({ id: l.id, kind: l.type, amount: Number(l.amount) || 0, date: l.date, note: l.note || "" })),
@@ -5410,18 +5494,20 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
         </div>
         <div style={{ color: "#8b95ac", fontSize: 11.5, marginTop: 4 }}>{(() => {
           if (remaining === 0) return "الحساب متوازن ✓";
-          if (owesMe > 0 && shareRemaining > 0) return `دينه لك ${money(owesMe)} − نصيبه ${money(shareRemaining)} FCFA`;
-          return remaining > 0 ? "هذا ما يدين لك به المندوب" : "مستحقّ له (نصيبه لم يُدفع بعد)";
+          if (remaining > 0) return `جمع ${money(collectedF)} − نصيبه ${money(shareF)} − سلّمك ${money(debits)}`;
+          return "سلّمك أكثر من المطلوب — ادفع له الفرق";
         })()}</div>
       </div>
 
       <div style={box}>
         <div style={head}>🧾 حسابه معي (FCFA)</div>
-        <div style={{ ...row, marginTop: 0 }}><span>📌 ديون زبائنه الحالية</span><strong>{f(custDebt)} FCFA</strong></div>
+        <div style={{ ...row, marginTop: 0 }}><span>📥 ما جمعه من زبائنه</span><strong className="sn-pos">{money(collectedF)} FCFA</strong></div>
+        <div style={row}><span>🟢 نصيبه (يحتفظ به)</span><strong className="sn-pos">−{money(shareF)} FCFA</strong></div>
         {credits > 0 && <div style={row}><span>➕ زيادات يدوية عليه</span><strong>{money(credits)} FCFA</strong></div>}
-        <div style={{ ...row, fontWeight: 800 }}><span>📌 إجمالي المطلوب منه</span><strong>{money(liab)} FCFA</strong></div>
-        <div style={row}><span>💰 ما دفعه لي</span><strong className="sn-pos">{money(paidByAgent)} FCFA</strong></div>
-        <div style={row}><span>🔻 المتبقّي عليه (دينه لي)</span><strong className={owesMe > 0 ? "sn-neg" : "sn-pos"}>{money(owesMe)} FCFA</strong></div>
+        <div style={{ ...row, fontWeight: 800 }}><span>📌 المطلوب منه (بعد نصيبه)</span><strong>{money(required)} FCFA</strong></div>
+        <div style={row}><span>🤝 ما سلّمه لي</span><strong className="sn-pos">{money(debits)} FCFA</strong></div>
+        {payouts > 0 && <div style={row}><span>💵 ما دفعته له</span><strong>{money(payouts)} FCFA</strong></div>}
+        <div style={{ ...row, fontWeight: 800, borderTop: "1px dashed #2a3550", paddingTop: 8 }}><span>🔻 المتبقّي عليه</span><strong className={remaining > 0 ? "sn-neg" : "sn-pos"}>{remaining < 0 ? "له " + money(-remaining) : money(remaining)} FCFA</strong></div>
       </div>
 
       <div style={box}>
@@ -5429,9 +5515,8 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
           <span style={head}>📈 نصيب المندوب</span>
           <span style={{ color: "#8b95ac", fontSize: 13 }}>{showProfit ? "▾ تفاصيل" : "◂ تفاصيل"}</span>
         </button>
-        <div style={{ ...row, marginTop: 8, fontWeight: 800 }}><span>🟢 نصيبه من المُحصّل</span><strong className={shareF < 0 ? "sn-neg" : "sn-pos"}>{money(shareF)} FCFA</strong></div>
-        {payouts > 0 && <div style={row}><span>✅ دُفع له</span><strong className="sn-pos">{money(payouts)} FCFA</strong></div>}
-        <div style={{ ...row, fontWeight: 800, borderTop: payouts > 0 ? "1px dashed #2a3550" : "none", paddingTop: payouts > 0 ? 8 : 0 }}><span>💵 المتبقّي له (ادفعه له)</span><strong className={shareRemaining > 0 ? "sn-pos" : "sn-pos"}>{money(Math.max(0, shareRemaining))} FCFA</strong></div>
+        <div style={{ ...row, marginTop: 8, fontWeight: 800 }}><span>🟢 نصيبه من الربح المُحصّل</span><strong className={shareF < 0 ? "sn-neg" : "sn-pos"}>{money(shareF)} FCFA</strong></div>
+        <div style={{ fontSize: 11, color: "#8b95ac", marginTop: 4 }}>يُخصم تلقائياً من حسابه (يحتفظ به من تحصيله)</div>
         {showProfit && (
           <>
             <div style={{ ...row, borderTop: "1px dashed #2a3550", paddingTop: 8, marginTop: 8 }}><span>🤝 ربحنا معاً (لو دُفع كل شيء)</span><strong className={combinedFull < 0 ? "sn-neg" : ""}>{f(combinedFull)} FCFA</strong></div>
@@ -5502,12 +5587,12 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
 
       <button onClick={() => exportAgentPDF(agent, data, settings)} style={{ width: "100%", marginBottom: 10, background: "#13294a", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>📄 كشف PDF (للإرسال)</button>
 
-      <button onClick={() => { const def = String(Math.max(0, shareRemaining)); const v = window.prompt(`كم تدفع للمندوب ${agent.name}؟ (FCFA)`, def); if (v != null && Number(v) > 0) onSettle(Number(v)); }} style={{ width: "100%", marginBottom: 10, background: "#13294a", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>💵 ادفع للمندوب نصيبه</button>
+      <button onClick={() => { const def = String(Math.max(0, -remaining)); const v = window.prompt(`كم تدفع للمندوب ${agent.name}؟ (FCFA)`, def); if (v != null && Number(v) > 0) onSettle(Number(v)); }} style={{ width: "100%", marginBottom: 10, background: "#13294a", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>💵 ادفع للمندوب {remaining < 0 ? `(له ${money(-remaining)})` : ""}</button>
 
-      <button onClick={() => setPayOpen(!payOpen)} style={{ width: "100%", marginBottom: payOpen ? 8 : 10, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>💰 دفعة من المندوب {payOpen ? "▾" : "◂"}</button>
+      <button onClick={() => setPayOpen(!payOpen)} style={{ width: "100%", marginBottom: payOpen ? 8 : 10, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>💵 زبون دفع للمندوب (تحصيل) {payOpen ? "▾" : "◂"}</button>
       {payOpen && (
         <div style={{ ...box, marginTop: 0 }}>
-          <div style={{ fontSize: 12.5, color: "#8b95ac", marginBottom: 8 }}>المندوب يدفع لك دين جهاز معيّن؟ اختر الجهاز ليُسجَّل تحصيله:</div>
+          <div style={{ fontSize: 12.5, color: "#8b95ac", marginBottom: 8 }}>سجّل ما دفعه كل زبون للمندوب (يصبح المبلغ بيد المندوب ويُطلب منه):</div>
           {(() => {
             const debtDevs = myDevices.filter((d) => tb(d.debt, d.debtCurrency || d.currency || "MRU") > 0);
             if (debtDevs.length === 0) return <p className="sn-hint" style={{ textAlign: "center", margin: "0 0 8px" }}>لا ديون على أجهزته حالياً.</p>;
@@ -5529,11 +5614,10 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
               );
             });
           })()}
-          <div style={{ borderTop: "1px dashed #2a3550", margin: "8px 0", paddingTop: 8 }}>
-            <button onClick={() => ask(`مبلغ عام دفعه ${agent.name} (غير مخصّص لجهاز)؟ (FCFA)`, (v, n) => onWithdraw(v, n))} style={{ width: "100%", background: "#1a2540", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 10, padding: "10px", fontFamily: "inherit", fontWeight: 700, fontSize: 13 }}>＋ مبلغ عام (غير مخصّص لجهاز)</button>
-          </div>
         </div>
       )}
+
+      <button onClick={() => { const def = String(Math.max(0, remaining)); const v = window.prompt(`كم سلّمك المندوب ${agent.name}؟ (FCFA)`, def); if (v != null && Number(v) > 0) onWithdraw(Number(v), "تسليم"); }} style={{ width: "100%", marginBottom: 10, background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>🤝 المندوب سلّمني مبلغاً</button>
 
       <button onClick={() => ask(`كم تزيد على دين المندوب؟ (FCFA)`, (v, n) => onAddCredit(v, n))} style={{ width: "100%", marginBottom: 10, background: "#3a2a16", color: "#fcd34d", border: "1px solid #5a4a2a", borderRadius: 12, padding: "12px", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }}>➕ زيادة على دينه</button>
 
@@ -5910,7 +5994,7 @@ function AgentView({ agent, data, settings, onExport, onExportImage }) {
               <button onClick={() => openWhatsApp(d, "receipt", settings, customerBalance(d, data, settings.rates))} style={{ flex: "1 1 46%", background: "#11304a", color: "#7dd3fc", border: "1px solid #244a63", borderRadius: 10, padding: "9px", fontFamily: "inherit", fontWeight: 800, fontSize: 13 }}>✅ تأكيد</button>
               {onExport && <button onClick={() => onExport(d)} style={miniBtn}>📄 PDF</button>}
               {onExportImage && <button onClick={() => onExportImage(d)} style={miniBtn}>🖼️ صورة</button>}
-              {telNum && <button onClick={() => window.open("tel:" + telNum)} style={miniBtn}>📞 اتصال</button>}
+              {telNum && <button onClick={() => window.open("https://wa.me/" + telNum, "_blank")} style={miniBtn}>📲 واتساب</button>}
             </div>
           </div>
         );
@@ -6036,7 +6120,7 @@ function CalDayItem({ d }) {
           {d.package ? <div>🗂️ {d.package}</div> : null}
           <div>📅 شحن {fmtDate(d.startDate)} ← انتهاء {fmtDate(d.endDate)}</div>
           {Number(d.debt) > 0 ? <div className="sn-neg">💰 دين {money(d.debt)} {symbolOf(d.debtCurrency || d.currency)}</div> : null}
-          {telNum ? <div style={{ marginTop: 6 }}><button className="sn-mini sn-mini--green" onClick={() => window.open("tel:" + telNum)}>📞 اتصال</button></div> : null}
+          {telNum ? <div style={{ marginTop: 6 }}><button className="sn-mini sn-mini--green" onClick={() => window.open("https://wa.me/" + telNum, "_blank")}>📲 واتساب</button></div> : null}
         </div>
       )}
     </div>
@@ -6046,6 +6130,62 @@ function CalDayItem({ d }) {
 /* ============================================================
    أدوات (تُفتح من القائمة الجانبية)
    ============================================================ */
+// لوحة: أجهزة مجمّعة حسب يوم انتهاء الاشتراك في الشهر (تطابق مجلّدات الهاتف)
+function ByDayPanel({ data, onCopy }) {
+  const [openDay, setOpenDay] = useState(null);
+  // اسم الاختصار = أول البريد قبل @
+  const shortName = (email) => (email || "").split("@")[0] || "—";
+  // تجميع الأجهزة غير المؤرشفة حسب يوم انتهائها
+  const groups = {};
+  (data.devices || []).forEach((d) => {
+    if (d.archived) return;
+    if (!d.endDate) return;
+    const day = parseDate(d.endDate).getDate(); // 1..31
+    (groups[day] = groups[day] || []).push(d);
+  });
+  const days = Object.keys(groups).map(Number).sort((a, b) => a - b);
+  const totalDevs = days.reduce((s, dy) => s + groups[dy].length, 0);
+
+  if (days.length === 0) {
+    return <p className="sn-hint">لا توجد أجهزة بتواريخ انتهاء حالياً.</p>;
+  }
+  return (
+    <div>
+      <p className="sn-hint" style={{ marginTop: 0 }}>
+        الأجهزة مرتّبة حسب <b>يوم انتهاء الاشتراك في الشهر</b> — تطابق مجلّدات هاتفك. اضغط اليوم لعرض أجهزته، وانسخ اسم الاختصار للبحث عنه في تطبيقاتك.
+      </p>
+      <p className="sn-hint" style={{ marginTop: 0, color: "#8b95ac" }}>{days.length} يوماً · {totalDevs} جهازاً</p>
+      {days.map((dy) => {
+        const list = groups[dy];
+        const isOpen = openDay === dy;
+        return (
+          <div key={dy} className="sn-byday-group">
+            <button className="sn-byday-head" onClick={() => setOpenDay(isOpen ? null : dy)}>
+              <span>📁 يوم {dy}</span>
+              <span className="sn-byday-count">{list.length} 📱 {isOpen ? "▾" : "◂"}</span>
+            </button>
+            {isOpen && (
+              <div className="sn-byday-body">
+                {list.map((d) => (
+                  <div key={d.id} className="sn-byday-dev">
+                    <div className="sn-byday-dev-info">
+                      <span className="sn-byday-dev-name">{d.customerName || "—"}</span>
+                      <span className="sn-byday-dev-short" dir="ltr">{shortName(d.email)}</span>
+                    </div>
+                    {d.email && (
+                      <button className="sn-byday-copy" onClick={() => onCopy(shortName(d.email), "اسم الاختصار")}>⎘ نسخ الاسم</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function CalendarPanel({ data }) {
   const now = new Date();
   const [base, setBase] = useState({ y: now.getFullYear(), m: now.getMonth() });
@@ -6306,7 +6446,6 @@ function RemindersSheet({ data, settings, onClose }) {
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={() => openWhatsApp(d, "reminder", settings, customerBalance(d, data, settings.rates))} style={{ background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 10, padding: "8px 12px", fontFamily: "inherit", fontWeight: 800, fontSize: 15 }}>📲</button>
-              {telNum && <button onClick={() => window.open("tel:" + telNum)} style={{ background: "#1b2746", color: "#a9c2ff", border: "1px solid #2a3a5e", borderRadius: 10, padding: "8px 12px", fontFamily: "inherit", fontWeight: 800, fontSize: 15 }}>📞</button>}
             </div>
           </div>
         );
@@ -6693,7 +6832,7 @@ function PriceCalc({ rates }) {
   );
 }
 
-function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, onDeleteCountry, onAddContact, onEditContact, onDeleteContact, onImportExcel, onImport, onRestoreTrash, onPurgeTrash, onEmptyTrash, onRestoreAuto, onAddExpense, onDeleteExpense, onAddService, onDeleteService, onAddInv, onAdjustInv, onDeleteInv, onSellInv, onSellDevice, onChargePending, onDeletePending, onDeleteSale, onAddOrder, onCycleOrder, onDeleteOrder }) {
+function ToolsPanel({ kind, data, toBase, onClose, onCopy, onAddCountry, onEditCountry, onDeleteCountry, onAddContact, onEditContact, onDeleteContact, onImportExcel, onImport, onRestoreTrash, onPurgeTrash, onEmptyTrash, onRestoreAuto, onAddExpense, onDeleteExpense, onAddService, onDeleteService, onAddInv, onAdjustInv, onDeleteInv, onSellInv, onSellDevice, onChargePending, onDeletePending, onDeleteSale, onAddOrder, onCycleOrder, onDeleteOrder }) {
   const fileRef = useRef(null);
   const excelRef = useRef(null);
   const EXCEL_HEADERS = [
@@ -6823,6 +6962,7 @@ function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, 
     calc: "💹 حاسبة سعر البيع",
     convert: "💱 محوّل العملات",
     calendar: "🗓️ تقويم التجديدات",
+    byday: "📁 أجهزة حسب يوم الشهر",
     services: "🛠️ الخدمات",
     inventory: "📦 المخزون",
     orders: "📋 قائمة الطلبات",
@@ -6841,6 +6981,7 @@ function ToolsPanel({ kind, data, toBase, onClose, onAddCountry, onEditCountry, 
       {kind === "orders" && <OrdersPanel data={data} onAdd={onAddOrder} onCycle={onCycleOrder} onDelete={onDeleteOrder} />}
       {kind === "wallets" && <WalletsPanel data={data} toBase={toBase} />}
       {kind === "calendar" && <CalendarPanel data={data} />}
+      {kind === "byday" && <ByDayPanel data={data} onCopy={onCopy} />}
       {kind === "expenses" && <ExpensesPanel data={data} toBase={toBase} onAdd={onAddExpense} onDelete={onDeleteExpense} />}
       {kind === "countries" && (
         <>
@@ -7131,11 +7272,13 @@ function Settings({ settings, onSave, onReset, onClearTx, onZeroAll }) {
 /* ============================================================
    عناصر واجهة عامة
    ============================================================ */
-// زر دائري: الإجراءات الحسّاسة تتطلّب ضغطاً مطوّلاً (ثانية) للتأكيد
-function HoldButton({ icon, label, onAct, variant = "def", hold = false }) {
+// زر دائري: الإجراءات الحسّاسة تتطلّب ضغطاً مطوّلاً (ثانية) أو ضغطتين (doubleTap) للتأكيد
+function HoldButton({ icon, label, onAct, variant = "def", hold = false, doubleTap = false }) {
   const [progress, setProgress] = useState(0);
+  const [armed, setArmed] = useState(false); // وضع الضغطتين: بانتظار الضغطة الثانية
   const raf = useRef(null);
   const start = useRef(0);
+  const armTimer = useRef(null);
 
   const stop = () => {
     if (raf.current) cancelAnimationFrame(raf.current);
@@ -7162,14 +7305,29 @@ function HoldButton({ icon, label, onAct, variant = "def", hold = false }) {
     if (hold) stop();
   };
   const click = () => {
+    if (doubleTap) {
+      if (armed) {
+        // الضغطة الثانية → نفّذ
+        if (armTimer.current) clearTimeout(armTimer.current);
+        setArmed(false);
+        onAct();
+      } else {
+        // الضغطة الأولى → جهّز وانتظر الثانية لمدّة 2.5 ثانية
+        setArmed(true);
+        if (armTimer.current) clearTimeout(armTimer.current);
+        armTimer.current = setTimeout(() => setArmed(false), 2500);
+      }
+      return;
+    }
     if (!hold) onAct();
   };
+  useEffect(() => () => { if (armTimer.current) clearTimeout(armTimer.current); }, []);
 
   return (
     <div className="sn-hold-wrap">
       <button
         type="button"
-        className={"sn-hold sn-hold--" + variant + (progress > 0 ? " is-holding" : "")}
+        className={"sn-hold sn-hold--" + variant + (progress > 0 ? " is-holding" : "") + (armed ? " is-armed" : "")}
         onClick={click}
         onPointerDown={begin}
         onPointerUp={cancel}
@@ -7181,7 +7339,7 @@ function HoldButton({ icon, label, onAct, variant = "def", hold = false }) {
         {hold && <span className="sn-hold-fill" style={{ height: progress * 100 + "%" }} />}
         <span className="sn-hold-icon">{icon}</span>
       </button>
-      <span className="sn-hold-label">{hold && progress > 0 ? "استمرّ…" : label}</span>
+      <span className="sn-hold-label">{doubleTap && armed ? "اضغط ثانيةً ✓" : hold && progress > 0 ? "استمرّ…" : label}</span>
     </div>
   );
 }
@@ -7462,6 +7620,8 @@ const CSS = `
 .sn-hold-wrap{display:flex;flex-direction:column;align-items:center;gap:3px;width:52px}
 .sn-hold{position:relative;width:40px;height:40px;border-radius:50%;border:1.5px solid var(--border);background:var(--surface);overflow:hidden;display:flex;align-items:center;justify-content:center;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;flex-shrink:0;transition:transform .1s}
 .sn-hold.is-holding{transform:scale(1.12)}
+.sn-hold.is-armed{transform:scale(1.12);background:rgba(251,113,133,.22);border-color:#fb7185;box-shadow:0 0 0 3px rgba(251,113,133,.25);animation:sn-armed-pulse .7s ease-in-out infinite}
+@keyframes sn-armed-pulse{0%,100%{box-shadow:0 0 0 3px rgba(251,113,133,.25)}50%{box-shadow:0 0 0 6px rgba(251,113,133,.12)}}
 .sn-hold-fill{position:absolute;left:0;bottom:0;width:100%;background:currentColor;opacity:.4}
 .sn-hold-icon{position:relative;font-size:17px;line-height:1;z-index:1}
 .sn-hold-label{font-size:9.5px;color:var(--muted);text-align:center;line-height:1.1;white-space:nowrap}
@@ -7596,6 +7756,15 @@ const CSS = `
 .sn-cal-day.has-soon{border-color:var(--warn);background:rgba(251,191,36,.12)}
 .sn-cal-day.has-expired{border-color:var(--bad);background:rgba(251,113,133,.12)}
 .sn-cal-dev{background:var(--surface2);border:1px solid var(--border);border-radius:11px;padding:9px 11px;margin-bottom:7px}
+.sn-byday-group{margin-bottom:8px}
+.sn-byday-head{width:100%;display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border:1px solid var(--border);border-radius:11px;padding:11px 13px;font-family:inherit;font-size:14.5px;font-weight:800;color:var(--text);cursor:pointer}
+.sn-byday-count{color:#7dd3fc;font-size:13px;font-weight:800}
+.sn-byday-body{padding:6px 0 2px}
+.sn-byday-dev{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#0f1830;border:1px solid #1f2c4a;border-radius:10px;padding:8px 11px;margin:6px 0}
+.sn-byday-dev-info{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sn-byday-dev-name{font-weight:800;font-size:13.5px;color:var(--text)}
+.sn-byday-dev-short{font-size:12.5px;color:#86efac;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sn-byday-copy{flex-shrink:0;background:#1c2a1c;color:#86efac;border:1px solid #2f4a2f;border-radius:9px;padding:7px 10px;font-family:inherit;font-weight:800;font-size:12px;cursor:pointer}
 .sn-cal-dev-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .sn-cal-dev-info{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
 .sn-cal-dev-name{font-weight:700;font-size:13.5px}
@@ -7632,6 +7801,11 @@ const CSS = `
 .sn-copy-ic{flex-shrink:0;background:var(--surface);border:1px solid var(--border);border-radius:7px;width:24px;height:24px;font-size:12px;color:var(--accent);cursor:pointer;padding:0;line-height:1}
 .sn-copy-ic:active{background:var(--accent);color:#fff}
 .sn-collapse-h{width:100%;display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border:1px solid var(--border);border-radius:11px;padding:10px 12px;font-family:inherit;font-size:13.5px;font-weight:800;color:var(--text);cursor:pointer;margin-bottom:8px}
+.sn-login-row{display:flex;gap:8px;margin:8px 0 4px;flex-wrap:wrap}
+.sn-login-btn{flex:1 1 46%;border-radius:10px;padding:10px;font-family:inherit;font-weight:800;font-size:13px;cursor:pointer;border:1px solid}
+.sn-login-btn--star{background:#11243f;color:#7dd3fc;border-color:#244a63}
+.sn-login-btn--mail{background:#3a1f1f;color:#fca5a5;border-color:#5a2a2a}
+.sn-login-copy{width:100%;margin:6px 0 4px;border-radius:10px;padding:10px;font-family:inherit;font-weight:800;font-size:13px;cursor:pointer;background:#1c2a1c;color:#86efac;border:1px solid #2f4a2f}
 .sn-collapse-h:active{background:var(--surface)}
 .sn-more-box{background:var(--surface2);border:1px solid var(--border);border-radius:11px;padding:10px 12px;margin-bottom:8px}
 .sn-more-line{font-size:13px;margin-bottom:6px}
@@ -7938,6 +8112,8 @@ const CSS = `
 /* ====== ملف الأرشيف على الرئيسية ====== */
 .sn-arch-folder{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:14px;margin-bottom:10px;overflow:hidden}
 .sn-arch-head{width:100%;display:flex;align-items:center;justify-content:space-between;background:transparent;border:none;color:#aeb8cc;font-family:inherit;font-weight:800;font-size:13.5px;padding:12px 14px;cursor:pointer}
+.sn-week-folder{border-color:#2a4a7e;background:rgba(110,168,255,.06)}
+.sn-week-folder .sn-arch-head{color:#9ec5ff}
 .sn-arch-body{padding:0 12px 10px;display:flex;flex-direction:column;gap:6px}
 .sn-due-btn--hide{background:#243352;color:#aeb8cc;border:1px solid #34425f}
 .sn-dev-col > .sn-card{min-width:0}
