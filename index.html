@@ -1239,24 +1239,29 @@ function StarNetApp() {
   }
 
   // تحصيل دين جهاز كامل عبر المندوب (المندوب سلّم مبلغ هذا الجهاز)
-  function collectDeviceFull(device) {
-    const amt = Number(device.debt) || 0;
-    if (amt <= 0) { flash("لا دين على هذا الجهاز"); return; }
+  function collectDeviceFull(device, amount) {
+    const cur = device.debtCurrency || device.currency || "MRU";
+    const full = Number(device.debt) || 0;
+    if (full <= 0) { flash("لا دين على هذا الجهاز"); return; }
+    let amt = amount == null ? full : Number(amount) || 0;
+    if (amt <= 0) { flash("أدخل مبلغاً صحيحاً"); return; }
+    if (amt > full) amt = full;
     snapshot("تحصيل عبر المندوب");
     setData((d) => {
       const tx = {
         id: uid(), deviceId: device.id, customerName: device.customerName, date: todayStr(),
-        amount: amt, currency: device.debtCurrency || device.currency || "MRU",
+        amount: amt, currency: cur,
         method: "عبر المندوب", type: "تسديد دين", proof: "",
       };
+      const newDebt = Math.round((full - amt) * 100) / 100;
       const newPaid = Math.round(((Number(device.amountPaid) || 0) + amt) * 100) / 100;
       return {
         ...d,
         transactions: [tx, ...d.transactions],
-        devices: d.devices.map((x) => (x.id === device.id ? { ...x, debt: 0, amountPaid: newPaid } : x)),
+        devices: d.devices.map((x) => (x.id === device.id ? { ...x, debt: newDebt, amountPaid: newPaid } : x)),
       };
     });
-    flash(`تم تحصيل دين «${device.customerName || "الجهاز"}» عبر المندوب ✅`);
+    flash(`سُجّل ${money(amt)} ${symbolOf(cur)} عن «${device.customerName || "الجهاز"}» ✅`);
     playSound("payment");
   }
 
@@ -2468,8 +2473,15 @@ function exportAgentPDF(agent, data, settings) {
   const combinedFull = custTotal - supCostAll;
   const myNetFull = combinedFull * (1 - percent / 100);
   const agentNetFull = combinedFull * (percent / 100);
-  const realized = custCollected - supPaid;
-  const agentNetNow = realized * (percent / 100);
+  let realizedProfit = 0;
+  devs.forEach((d) => {
+    const rev = tb(d.totalCustomer, d.currency || "MRU");
+    const paid = tb(d.amountPaid, d.currency || "MRU");
+    const cost = tb(d.cost, d.costCurrency || "USDT");
+    const margin = rev > 0 ? (rev - cost) / rev : 0;
+    realizedProfit += paid * margin;
+  });
+  const agentNetNow = realizedProfit * (percent / 100);
   const credits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "credit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const debits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
@@ -5098,16 +5110,18 @@ function agentBalance(agent, data, toBase) {
 function agentRemaining(agent, data, rates) {
   const tb = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
   const fcfa = rates.FCFA || 3.6;
-  let custDebt = 0, realized = 0;
+  let custDebt = 0, realizedProfit = 0;
   (data.devices || []).forEach((d) => {
     if (d.agentId !== agent.id || d.broken) return;
     custDebt += tb(d.debt, d.debtCurrency || d.currency || "MRU");
-    const collected = tb(d.amountPaid, d.currency || "MRU");
-    const cost = d.costPaid ? tb(d.cost, d.costCurrency || "USDT") : 0;
-    realized += collected - cost;
+    const rev = tb(d.totalCustomer, d.currency || "MRU");
+    const paid = tb(d.amountPaid, d.currency || "MRU");
+    const cost = tb(d.cost, d.costCurrency || "USDT");
+    const margin = rev > 0 ? (rev - cost) / rev : 0;
+    realizedProfit += paid * margin;
   });
   const liab = Math.round(custDebt / fcfa);
-  const shareF = Math.round((realized * ((Number(agent.percent) || 0) / 100)) / fcfa);
+  const shareF = Math.round((realizedProfit * ((Number(agent.percent) || 0) / 100)) / fcfa);
   const credits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "credit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const debits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
@@ -5335,12 +5349,17 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
   const [showDevs, setShowDevs] = useState(false);
   const [showSup, setShowSup] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  const [payAmts, setPayAmts] = useState({});
   const [showProfit, setShowProfit] = useState(false);
+  const [showPays, setShowPays] = useState(false);
   const rates = (settings && settings.rates) || { USDT: 430, FCFA: 3.6, MRU: 1 };
   const tb = (a, c) => (Number(a) || 0) * (rates[c] ?? 1);
   const toF = (b) => Math.round(b / (rates.FCFA || 3.6));
   const f = (b) => money(toF(b));
   const myDevices = (data.devices || []).filter((d) => d.agentId === agent.id && !d.broken);
+  const myDevIds = new Set(myDevices.map((d) => d.id));
+  const custPays = (data.transactions || []).filter((t) => t.deviceId && myDevIds.has(t.deviceId) && !t.isExpense && (Number(t.amount) || 0) > 0).slice(0, 80);
+  const custPaysTotal = custPays.reduce((s, t) => s + tb(Number(t.amount) || 0, t.currency || "MRU"), 0);
   const percent = Number(agent.percent) || 0;
   let custDebt = 0, custTotal = 0, custCollected = 0, supCostAll = 0, supPaid = 0, supUnpaid = 0;
   myDevices.forEach((d) => {
@@ -5354,8 +5373,15 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
   const combinedFull = custTotal - supCostAll;
   const myNetFull = combinedFull * (1 - percent / 100);
   const agentNetFull = combinedFull * (percent / 100);
-  const realized = custCollected - supPaid;
-  const agentNetNow = realized * (percent / 100);
+  let realizedProfit = 0;
+  myDevices.forEach((d) => {
+    const rev = tb(d.totalCustomer, d.currency || "MRU");
+    const paid = tb(d.amountPaid, d.currency || "MRU");
+    const cost = tb(d.cost, d.costCurrency || "USDT");
+    const margin = rev > 0 ? (rev - cost) / rev : 0;
+    realizedProfit += paid * margin;
+  });
+  const agentNetNow = realizedProfit * (percent / 100);
   const credits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "credit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const debits = (data.agentLedger || []).filter((l) => l.agentId === agent.id && l.type === "debit").reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const payouts = (data.agentPayouts || []).filter((p) => p.agentId === agent.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
@@ -5382,7 +5408,11 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
         <div style={{ fontSize: 26, fontWeight: 900, color: remaining > 0 ? negCol : posCol }}>
           {remaining > 0 ? `عليه ${money(remaining)}` : remaining < 0 ? `له ${money(-remaining)}` : "مُسوّى ✓"} <span style={{ fontSize: 13 }}>FCFA</span>
         </div>
-        <div style={{ color: "#8b95ac", fontSize: 11.5, marginTop: 4 }}>{remaining > 0 ? "هذا ما يدين لك به المندوب" : remaining < 0 ? "مستحقّ له (نصيبه لم يُدفع بعد)" : "الحساب متوازن"}</div>
+        <div style={{ color: "#8b95ac", fontSize: 11.5, marginTop: 4 }}>{(() => {
+          if (remaining === 0) return "الحساب متوازن ✓";
+          if (owesMe > 0 && shareRemaining > 0) return `دينه لك ${money(owesMe)} − نصيبه ${money(shareRemaining)} FCFA`;
+          return remaining > 0 ? "هذا ما يدين لك به المندوب" : "مستحقّ له (نصيبه لم يُدفع بعد)";
+        })()}</div>
       </div>
 
       <div style={box}>
@@ -5408,6 +5438,28 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
             <div style={row}><span>🟢 نصيبه لو دُفع كل شيء</span><strong className={agentNetFull < 0 ? "sn-neg" : "sn-pos"}>{f(agentNetFull)} FCFA</strong></div>
             <div style={row}><span>🟢 صافي ربحي أنا</span><strong className={myNetFull < 0 ? "sn-neg" : "sn-pos"}>{f(myNetFull)} FCFA</strong></div>
           </>
+        )}
+      </div>
+
+      <div style={box}>
+        <button onClick={() => setShowPays(!showPays)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "transparent", border: "none", color: "inherit", fontFamily: "inherit", cursor: "pointer", padding: 0 }}>
+          <span style={head}>💵 دفعات زبائنه ({custPays.length})</span>
+          <span style={{ color: "#8b95ac", fontSize: 13 }}>{showPays ? "▾ إخفاء" : "◂ عرض"}</span>
+        </button>
+        <div style={{ ...row, marginTop: 8, fontWeight: 800 }}><span>📥 إجمالي ما دفعه زبائنه</span><strong className="sn-pos">{f(custPaysTotal)} FCFA</strong></div>
+        {showPays && (
+          custPays.length === 0 ? (
+            <p className="sn-hint" style={{ textAlign: "center", margin: "8px 0 0" }}>لا دفعات بعد.</p>
+          ) : (
+            <div style={{ marginTop: 8 }}>
+              {custPays.map((t) => (
+                <div key={t.id} style={row}>
+                  <span style={{ minWidth: 0 }}>{t.customerName || "زبون"} <span style={{ color: "#6b7488", fontSize: 11 }}>· {fmtDate(t.date)}{t.type ? " · " + t.type : ""}</span></span>
+                  <strong className="sn-pos">{f(tb(Number(t.amount) || 0, t.currency || "MRU"))} F</strong>
+                </div>
+              ))}
+            </div>
+          )
         )}
       </div>
 
@@ -5459,15 +5511,23 @@ function AgentAccountSheet({ agent, data, toBase, settings, onClose, onAddCredit
           {(() => {
             const debtDevs = myDevices.filter((d) => tb(d.debt, d.debtCurrency || d.currency || "MRU") > 0);
             if (debtDevs.length === 0) return <p className="sn-hint" style={{ textAlign: "center", margin: "0 0 8px" }}>لا ديون على أجهزته حالياً.</p>;
-            return debtDevs.map((d) => (
+            return debtDevs.map((d) => {
+              const cur = d.debtCurrency || d.currency || "MRU";
+              const full = Number(d.debt) || 0;
+              const val = payAmts[d.id] != null ? payAmts[d.id] : String(full);
+              return (
               <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: "#0e1530", border: "1px solid #243352", borderRadius: 10, padding: "8px 10px", marginBottom: 6 }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{d.customerName || "بدون اسم"}</div>
-                  <div style={{ color: "#fb7185", fontSize: 12 }}>{f(tb(d.debt, d.debtCurrency || d.currency || "MRU"))} FCFA</div>
+                  <div style={{ color: "#fb7185", fontSize: 12 }}>الدين: {money(full)} {symbolOf(cur)}</div>
                 </div>
-                <button onClick={() => { onCollectDevice(d); }} style={{ flex: "none", background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 9, padding: "8px 12px", fontFamily: "inherit", fontWeight: 800, fontSize: 13 }}>✓ دُفع</button>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flex: "none" }}>
+                  <input type="number" inputMode="numeric" value={val} onChange={(e) => setPayAmts((p) => ({ ...p, [d.id]: e.target.value }))} style={{ width: 78, background: "#0a1020", border: "1px solid #2a3550", borderRadius: 8, color: "#e6edf7", fontFamily: "inherit", fontWeight: 700, fontSize: 13, padding: "8px 6px", textAlign: "center" }} />
+                  <button onClick={() => { onCollectDevice(d, Number(val)); setPayAmts((p) => ({ ...p, [d.id]: "" })); }} style={{ flex: "none", background: "#15361f", color: "#6ee7b7", border: "1px solid #1f5a33", borderRadius: 9, padding: "8px 12px", fontFamily: "inherit", fontWeight: 800, fontSize: 13 }}>✓ دفع</button>
+                </div>
               </div>
-            ));
+              );
+            });
           })()}
           <div style={{ borderTop: "1px dashed #2a3550", margin: "8px 0", paddingTop: 8 }}>
             <button onClick={() => ask(`مبلغ عام دفعه ${agent.name} (غير مخصّص لجهاز)؟ (FCFA)`, (v, n) => onWithdraw(v, n))} style={{ width: "100%", background: "#1a2540", color: "#9ec5ff", border: "1px solid #2a4a7e", borderRadius: 10, padding: "10px", fontFamily: "inherit", fontWeight: 700, fontSize: 13 }}>＋ مبلغ عام (غير مخصّص لجهاز)</button>
