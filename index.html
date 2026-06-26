@@ -5207,26 +5207,29 @@ function Agents({ data, toBase, settings, onAddAgent, onEditAgent, onDeleteAgent
           });
           const realizedProfit = collected - supPaidAmt;
           const payoutsAmt = payouts.filter((p) => p.agentId === a.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+          const supPaidUSD = supPaidAmt / (rates.USDT || 430);
+          const supRemUSD = supRemAmt / (rates.USDT || 430);
           const costF = (d) => fF(toBase(Number(d.cost) || 0, d.costCurrency || "USDT")) + " F";
           const debtF = (d) => fF(toBase(Number(d.debt) || 0, d.debtCurrency || d.currency || "MRU")) + " F";
           const paidF = (d) => fF(toBase(Number(d.amountPaid) || 0, d.currency || "MRU")) + " F";
           const profF = (d) => fF(devProfit[d.id] || 0) + " F";
           const dateV = (d) => (d.endDate ? fmtDate(d.endDate) : "—");
+          const costBoth = (d) => { const b = toBase(Number(d.cost) || 0, d.costCurrency || "USDT"); return "$" + money(b / (rates.USDT || 430)) + " · " + fF(b) + " F"; };
           const chips = [
-            { i: "❌", l: "غير مدفوعة", c: "#fb7185", devs: myDevs.filter((d) => !d.costPaid && Number(d.cost) > 0 && !d.broken), val: costF },
-            { i: "✅", l: "مدفوعة", c: "#34d399", devs: myDevs.filter((d) => d.costPaid && Number(d.cost) > 0), val: costF },
-            { i: "💰", l: "ديون الزبائن", v: fF(custDebtAmt) + " F", c: "#fbbf24", devs: myDevs.filter((d) => Number(d.debt) > 0), val: debtF },
             { i: "📥", l: "المدفوعات", v: fF(collected) + " F", c: "#34d399", devs: myDevs.filter((d) => Number(d.amountPaid) > 0), val: paidF },
+            { i: "💰", l: "ديون الزبائن", v: fF(custDebtAmt) + " F", c: "#fbbf24", devs: myDevs.filter((d) => Number(d.debt) > 0), val: debtF },
             { i: "📊", l: "صافي بعد الفواتير", v: fF(realizedProfit) + " F", c: "#22d3ee", devs: myDevs, val: profF },
-            { i: "🔧", l: "متعطّلة", c: "#94a3b8", devs: myDevs.filter((d) => d.broken), val: dateV },
-            { i: "📉", l: "خسرنا معها", c: "#fb7185", devs: myDevs.filter((d) => (d.id in devProfit) && devProfit[d.id] <= 0), val: profF },
-            { i: "⚠️", l: "دفع وبقي دين", c: "#fbbf24", devs: myDevs.filter((d) => Number(d.amountPaid) > 0 && Number(d.debt) > 0), val: debtF },
-            { i: "🏭", l: "دُفع للمورّد", v: fF(supPaidAmt) + " F", c: "#34d399", devs: myDevs.filter((d) => d.costPaid && Number(d.cost) > 0), val: costF },
+            { i: "🏭", l: "دُفع للمورّد", v: "$" + money(supPaidUSD), sub: fF(supPaidAmt) + " F", c: "#34d399", devs: myDevs.filter((d) => d.costPaid && Number(d.cost) > 0), val: costBoth },
+            { i: "🧾", l: "متبقّي للمورّد", v: "$" + money(supRemUSD), sub: fF(supRemAmt) + " F", c: "#fb7185", devs: myDevs.filter((d) => !d.costPaid && Number(d.cost) > 0), val: costBoth },
             { i: "🤝", l: "دُفع للمندوب", v: money(payoutsAmt) + " F", c: "#9ec5ff", devs: [], val: () => "" },
-            { i: "🧾", l: "متبقّي للمورّد", v: fF(supRemAmt) + " F", c: "#fb7185", devs: myDevs.filter((d) => !d.costPaid && Number(d.cost) > 0), val: costF },
+            { i: "✅", l: "مدفوعة للمورّد", c: "#34d399", devs: myDevs.filter((d) => d.costPaid && Number(d.cost) > 0), val: costBoth },
+            { i: "❌", l: "غير مدفوعة", c: "#fb7185", devs: myDevs.filter((d) => !d.costPaid && Number(d.cost) > 0 && !d.broken), val: costBoth },
+            { i: "⚠️", l: "دفع وبقي دين", c: "#fbbf24", devs: myDevs.filter((d) => Number(d.amountPaid) > 0 && Number(d.debt) > 0), val: debtF },
             { i: "⏳", l: "قريباً تُشحن", c: "#fbbf24", devs: myDevs.filter((d) => { const dl = diffDays(today, d.endDate); return dl >= 0 && dl <= 5; }), val: dateV },
             { i: "🔄", l: "شهرية", c: "#a78bfa", devs: myDevs.filter((d) => Number(d.durationDays) > 0 && Number(d.durationDays) <= 31), val: dateV },
             { i: "⛔", l: "متوقّفة", c: "#fb7185", devs: myDevs.filter((d) => !d.broken && d.endDate && diffDays(today, d.endDate) < 0), val: dateV },
+            { i: "🔧", l: "متعطّلة", c: "#94a3b8", devs: myDevs.filter((d) => d.broken), val: dateV },
+            { i: "📉", l: "خسرنا معها", c: "#fb7185", devs: myDevs.filter((d) => (d.id in devProfit) && devProfit[d.id] <= 0), val: profF },
             { i: "1️⃣", l: "شُحنت مرّة", c: "#94a3b8", devs: myDevs.filter((d) => (renewMap[d.id] || 0) <= 1), val: dateV },
           ];
           const statKey = (i) => `${a.id}:${i}`;
@@ -5281,6 +5284,7 @@ function Agents({ data, toBase, settings, onAddAgent, onEditAgent, onDeleteAgent
                   <button className={"sn-ag-stat" + (openIdx === i ? " is-on" : "")} key={i} style={{ borderColor: s.c + (openIdx === i ? "" : "44") }} onClick={() => setOpenStat(openIdx === i ? null : statKey(i))}>
                     <span className="sn-ag-stat-i">{s.i}</span>
                     <b style={{ color: s.c }}>{s.v != null ? s.v : s.devs.length}</b>
+                    {s.sub && <span className="sn-ag-stat-sub">{s.sub}</span>}
                     <span className="sn-ag-stat-l">{s.l}</span>
                   </button>
                 ))}
@@ -7863,6 +7867,7 @@ const CSS = `
 .sn-ag-stat-i{font-size:17px;line-height:1}
 .sn-ag-stat b{font-size:12.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .sn-ag-stat-l{font-size:8.5px;color:#8b95ac;line-height:1.15}
+.sn-ag-stat-sub{font-size:9px;font-weight:700;color:#6ee7b7;line-height:1;margin-top:-1px}
 .sn-ag-stat-panel{background:#0e1530;border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-top:8px}
 .sn-ag-stat-panel-h{font-weight:800;font-size:13px;color:#cbd5e1;margin-bottom:8px;text-align:center}
 .sn-ag-stat-row{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:5px 0;border-bottom:1px solid #1b2540}
